@@ -96,7 +96,10 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref StageName
-      # TODO(C): restrict CorsConfiguration.AllowOrigins to the CloudFront domain
+      # In prod the SPA calls /api/* same-origin through CloudFront, so CORS is not
+      # exercised there. This open policy only affects direct calls to the bare API
+      # Gateway URL; it is left permissive for local/synthetic use (referencing the
+      # CloudFront domain here would create a circular dependency with SiteDistribution).
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowHeaders: ["*"]
@@ -188,13 +191,104 @@ Resources:
           Subscribers:
             - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
 
-  # TODO(C): SiteBucket (private) + CloudFront distribution w/ OAC for the React SPA.
-  # Deferred: frontend hosting is a separate deliverable; backend/API + negotiation are complete here.
+  # --- React SPA hosting: private S3 bucket + CloudFront (OAC), same-origin /api/* proxy ---
+  # The bucket is never public; only CloudFront can read it via Origin Access Control.
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  SiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-site-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName} SPA + /api proxy"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100          # US/CA/EU edges only - cheapest
+        IPV6Enabled: true
+        Origins:
+          # SPA static assets from the private bucket (locked to CloudFront via OAC).
+          - Id: s3-site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOAC.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }   # must be empty when OAC is set
+          # The HTTP API, so the SPA can call same-origin /api/* (no CORS in prod).
+          - Id: api-gw
+            DomainName: !Sub "${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath: !Sub "/${StageName}"               # HTTP API stage prefix
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: s3-site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # Managed-CachingOptimized (well-known AWS policy id).
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api-gw
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            # Managed-CachingDisabled + Managed-AllViewerExceptHostHeader.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CustomErrorResponses:
+          # SPA client-side routing: deep links resolve to index.html.
+          # A missing S3 key returns 403 (GetObject-only policy), so map both.
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true   # *.cloudfront.net, no custom domain
+
+  # Grant only this distribution read access to the bucket (OAC + SourceArn condition).
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution.Id}"
 
 Outputs:
+  AppUrl:
+    Description: Public app URL - CloudFront serves the SPA and proxies /api/* to the API.
+    Value: !Sub "https://${SiteDistribution.DomainName}"
   ApiBaseUrl:
-    Description: HTTP API base URL (frontend talks to <this>/api/...)
+    Description: Direct HTTP API base URL (bypasses CloudFront; used for local/debug).
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  SiteBucketName:
+    Description: S3 bucket that holds the built SPA (deploy target for `aws s3 sync`).
+    Value: !Ref SiteBucket
+  DistributionId:
+    Description: CloudFront distribution id (target for cache invalidations).
+    Value: !Ref SiteDistribution
   JobsTableName:
     Value: !Ref JobsTable
   StateMachineArn:
