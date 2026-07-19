@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   EMS Agent - production-shaped serverless RCM prototype.
-  SKELETON (Phase 0): resource wiring + names are fixed so the ASL substitutions and
-  Workstream A handlers line up. Workstream C fleshes out IAM least-privilege, S3+CloudFront/OAC,
-  SSM params, Budgets alarm, and CORS/throttling.
+  Workstream C: negotiation state machine + task Lambdas wired via SAM substitutions,
+  on-demand DynamoDB with TTL, least-privilege IAM (Bedrock scoped to the model, SES scoped
+  to account identities), and a monthly cost Budget at $5/$10. No VPC/NAT (cost guardrail).
+  S3+CloudFront/OAC for the SPA is tracked as a follow-up (see TODO below).
 
 Parameters:
   StageName:
@@ -25,6 +26,19 @@ Parameters:
     Type: String
     Default: ""
     Description: Verified SES address for escalation notices (used only when EnableSesEmail=true).
+  BudgetLimit:
+    Type: Number
+    Default: 10
+    Description: Monthly cost budget ceiling in USD. Alerts fire at 50% ($5) and 100% ($10).
+  BudgetAlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email to receive Budget threshold alerts. When empty, the Budget resource is skipped
+      (keeps `sam deploy` frictionless in throwaway accounts).
+
+Conditions:
+  HasBudgetAlertEmail: !Not [!Equals [!Ref BudgetAlertEmail, ""]]
 
 Globals:
   Function:
@@ -66,7 +80,7 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: ["bedrock:InvokeModel", "bedrock:Converse"]
-              Resource: "*"
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
             - Effect: Allow
               Action: ["states:StartExecution"]
               Resource: !Ref NegotiationStateMachine
@@ -76,13 +90,16 @@ Resources:
       Events:
         Api:
           Type: HttpApi
-          Properties: { ApiId: !Ref HttpApi, Path: /api/{proxy+}, Method: ANY }
+          Properties: { ApiId: !Ref HttpApi, Path: "/api/{proxy+}", Method: ANY }
 
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref StageName
-      # TODO(C): restrict CorsConfiguration.AllowOrigins to the CloudFront domain
+      # In prod the SPA calls /api/* same-origin through CloudFront, so CORS is not
+      # exercised there. This open policy only affects direct calls to the bare API
+      # Gateway URL; it is left permissive for local/synthetic use (referencing the
+      # CloudFront domain here would create a circular dependency with SiteDistribution).
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowHeaders: ["*"]
@@ -91,16 +108,16 @@ Resources:
   # --- Step Functions task Lambdas (Workstream A implements handlers) ---
   DenyFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.deny, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.deny, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   AppealFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.appeal, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.appeal, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   ReReviewFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.rereview, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.rereview, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   FinalRulingFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.final_ruling, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.final_ruling, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   ResolveFunction:
     Type: AWS::Serverless::Function
     Properties: { CodeUri: ../backend/, Handler: app.handlers.resolve, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } } ] }
@@ -111,7 +128,11 @@ Resources:
       Handler: app.handlers.escalate
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
-        - Statement: [ { Effect: Allow, Action: ["ses:SendEmail"], Resource: "*" } ]   # used only when ENABLE_SES_EMAIL=true
+        # Scoped to this account's verified SES identities; used only when ENABLE_SES_EMAIL=true.
+        - Statement:
+            - Effect: Allow
+              Action: ["ses:SendEmail"]
+              Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
 
   # --- The negotiation state machine ---
   NegotiationStateMachine:
@@ -135,14 +156,139 @@ Resources:
         - LambdaInvokePolicy: { FunctionName: !Ref ResolveFunction }
         - LambdaInvokePolicy: { FunctionName: !Ref EscalateFunction }
 
-  # TODO(C): SiteBucket (private) + CloudFront distribution w/ OAC for the React SPA
-  # TODO(C): AWS::Budgets::Budget at $5/$10 -> SNS -> EscalationEmail
-  # TODO(C): SSM Parameter Store entries for per-agent model ids / feature flags
+  # --- Monthly cost guardrail: alert at 50% ($5) and 100% ($10) of the budget ---
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudgetAlertEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-monthly-cost"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimit
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50            # $5 of a $10 budget
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100           # $10 hard ceiling
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100           # projected to blow the ceiling this month
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+
+  # --- React SPA hosting: private S3 bucket + CloudFront (OAC), same-origin /api/* proxy ---
+  # The bucket is never public; only CloudFront can read it via Origin Access Control.
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  SiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-site-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName} SPA + /api proxy"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100          # US/CA/EU edges only - cheapest
+        IPV6Enabled: true
+        Origins:
+          # SPA static assets from the private bucket (locked to CloudFront via OAC).
+          - Id: s3-site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOAC.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }   # must be empty when OAC is set
+          # The HTTP API, so the SPA can call same-origin /api/* (no CORS in prod).
+          - Id: api-gw
+            DomainName: !Sub "${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath: !Sub "/${StageName}"               # HTTP API stage prefix
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: s3-site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # Managed-CachingOptimized (well-known AWS policy id).
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api-gw
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            # Managed-CachingDisabled + Managed-AllViewerExceptHostHeader.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CustomErrorResponses:
+          # SPA client-side routing: deep links resolve to index.html.
+          # A missing S3 key returns 403 (GetObject-only policy), so map both.
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true   # *.cloudfront.net, no custom domain
+
+  # Grant only this distribution read access to the bucket (OAC + SourceArn condition).
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution.Id}"
 
 Outputs:
+  AppUrl:
+    Description: Public app URL - CloudFront serves the SPA and proxies /api/* to the API.
+    Value: !Sub "https://${SiteDistribution.DomainName}"
   ApiBaseUrl:
-    Description: HTTP API base URL (frontend talks to <this>/api/...)
+    Description: Direct HTTP API base URL (bypasses CloudFront; used for local/debug).
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  SiteBucketName:
+    Description: S3 bucket that holds the built SPA (deploy target for `aws s3 sync`).
+    Value: !Ref SiteBucket
+  DistributionId:
+    Description: CloudFront distribution id (target for cache invalidations).
+    Value: !Ref SiteDistribution
   JobsTableName:
     Value: !Ref JobsTable
   StateMachineArn:
