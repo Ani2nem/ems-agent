@@ -13,7 +13,7 @@ export interface Vitals {
 
 export interface ePCRChart {
   incidentId: string;
-  patient: { age: number; sex: string };
+  patient: { age: number | null; sex: string };
   payer: Payer;
   chiefComplaint: string;
   mechanismOfInjury: string;
