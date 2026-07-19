@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   EMS Agent - production-shaped serverless RCM prototype.
-  SKELETON (Phase 0): resource wiring + names are fixed so the ASL substitutions and
-  Workstream A handlers line up. Workstream C fleshes out IAM least-privilege, S3+CloudFront/OAC,
-  SSM params, Budgets alarm, and CORS/throttling.
+  Workstream C: negotiation state machine + task Lambdas wired via SAM substitutions,
+  on-demand DynamoDB with TTL, least-privilege IAM (Bedrock scoped to the model, SES scoped
+  to account identities), and a monthly cost Budget at $5/$10. No VPC/NAT (cost guardrail).
+  S3+CloudFront/OAC for the SPA is tracked as a follow-up (see TODO below).
 
 Parameters:
   StageName:
@@ -25,6 +26,19 @@ Parameters:
     Type: String
     Default: ""
     Description: Verified SES address for escalation notices (used only when EnableSesEmail=true).
+  BudgetLimit:
+    Type: Number
+    Default: 10
+    Description: Monthly cost budget ceiling in USD. Alerts fire at 50% ($5) and 100% ($10).
+  BudgetAlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email to receive Budget threshold alerts. When empty, the Budget resource is skipped
+      (keeps `sam deploy` frictionless in throwaway accounts).
+
+Conditions:
+  HasBudgetAlertEmail: !Not [!Equals [!Ref BudgetAlertEmail, ""]]
 
 Globals:
   Function:
@@ -66,7 +80,7 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: ["bedrock:InvokeModel", "bedrock:Converse"]
-              Resource: "*"
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
             - Effect: Allow
               Action: ["states:StartExecution"]
               Resource: !Ref NegotiationStateMachine
@@ -76,7 +90,7 @@ Resources:
       Events:
         Api:
           Type: HttpApi
-          Properties: { ApiId: !Ref HttpApi, Path: /api/{proxy+}, Method: ANY }
+          Properties: { ApiId: !Ref HttpApi, Path: "/api/{proxy+}", Method: ANY }
 
   HttpApi:
     Type: AWS::Serverless::HttpApi
@@ -91,16 +105,16 @@ Resources:
   # --- Step Functions task Lambdas (Workstream A implements handlers) ---
   DenyFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.deny, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.deny, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   AppealFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.appeal, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.appeal, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   ReReviewFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.rereview, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.rereview, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   FinalRulingFunction:
     Type: AWS::Serverless::Function
-    Properties: { CodeUri: ../backend/, Handler: app.handlers.final_ruling, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: "*" } ] } ] }
+    Properties: { CodeUri: ../backend/, Handler: app.handlers.final_ruling, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } }, { Statement: [ { Effect: Allow, Action: ["bedrock:InvokeModel", "bedrock:Converse"], Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}" } ] } ] }
   ResolveFunction:
     Type: AWS::Serverless::Function
     Properties: { CodeUri: ../backend/, Handler: app.handlers.resolve, Policies: [ { DynamoDBCrudPolicy: { TableName: !Ref JobsTable } } ] }
@@ -111,7 +125,11 @@ Resources:
       Handler: app.handlers.escalate
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
-        - Statement: [ { Effect: Allow, Action: ["ses:SendEmail"], Resource: "*" } ]   # used only when ENABLE_SES_EMAIL=true
+        # Scoped to this account's verified SES identities; used only when ENABLE_SES_EMAIL=true.
+        - Statement:
+            - Effect: Allow
+              Action: ["ses:SendEmail"]
+              Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
 
   # --- The negotiation state machine ---
   NegotiationStateMachine:
@@ -135,9 +153,43 @@ Resources:
         - LambdaInvokePolicy: { FunctionName: !Ref ResolveFunction }
         - LambdaInvokePolicy: { FunctionName: !Ref EscalateFunction }
 
-  # TODO(C): SiteBucket (private) + CloudFront distribution w/ OAC for the React SPA
-  # TODO(C): AWS::Budgets::Budget at $5/$10 -> SNS -> EscalationEmail
-  # TODO(C): SSM Parameter Store entries for per-agent model ids / feature flags
+  # --- Monthly cost guardrail: alert at 50% ($5) and 100% ($10) of the budget ---
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudgetAlertEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-monthly-cost"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimit
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50            # $5 of a $10 budget
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100           # $10 hard ceiling
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100           # projected to blow the ceiling this month
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail }
+
+  # TODO(C): SiteBucket (private) + CloudFront distribution w/ OAC for the React SPA.
+  # Deferred: frontend hosting is a separate deliverable; backend/API + negotiation are complete here.
 
 Outputs:
   ApiBaseUrl:
