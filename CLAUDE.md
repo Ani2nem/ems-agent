@@ -8,6 +8,9 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 - `docs/workflow-contract.md` - negotiation state I/O and the DynamoDB job-record schema (backend <-> infra). FROZEN.
 - `.claude/plans/i-m-trying-to-build-cozy-castle.md` - full architecture, rationale, and product flow.
 
+## Living notes (not frozen, but read before touching related code)
+- `docs/bedrock-live-wiring-notes.md` - findings from running the real Bedrock path against Nova Micro (PR #8, not yet merged): a job-store backend-selection fix relevant to the infra/deploy track, and prompt/parsing gotchas relevant to anyone touching agent prompts or tagged-output parsing.
+
 ## Tech stack
 - **Backend:** Python 3.12, FastAPI + Mangum (on Lambda), boto3 Bedrock **Converse** API.
 - **AI model:** Amazon **Nova Micro** (`amazon.nova-micro-v1:0`) for every agent in v1. Each agent's model id is config (SSM/env), swappable independently later.
