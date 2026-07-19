@@ -27,7 +27,7 @@ React SPA (S3+CloudFront) -> HTTP API -> Lambda (FastAPI) -> Step Functions nego
 
 ## Build / dev / test
 **Backend**
-- Install: `cd backend && pip install -r requirements.txt -r requirements-dev.txt`
+- Install: `cd backend && pip install -r requirements.txt -r requirements-dev.txt` (if this fails building `pydantic-core`, see `docs/dev-notes.md` - your `python3` may not be 3.12)
 - Local (free, no AWS): `cd backend && USE_BEDROCK=false uvicorn app.main:app --reload --port 8000`
 - Test: `cd backend && pytest -q`
 
