@@ -42,6 +42,101 @@ def test_mock_chart_keyword_extraction():
     EPCRChart.model_validate(chart)
 
 
+# --------------------------- age extraction --------------------------- #
+
+
+@pytest.mark.parametrize(
+    "transcript,expected_age",
+    [
+        ("58-year-old male involved in a fall.", 58),
+        ("58 year old male involved in a fall.", 58),
+        ("Patient is 58yo male.", 58),
+        ("Patient is 58 y/o male.", 58),
+        ("Patient is 58 y.o. male.", 58),
+        ("Patient found down, no age given in the dictation.", None),
+    ],
+)
+def test_mock_chart_age_extraction(transcript, expected_age):
+    chart = agents.parse_chart(transcript)
+    assert chart["patient"]["age"] == expected_age
+    from app.models import EPCRChart
+
+    EPCRChart.model_validate(chart)
+
+
+# ------------------------- vitals extraction ------------------------- #
+
+
+@pytest.mark.parametrize(
+    "transcript,field,expected",
+    [
+        ("BP 120/80 on scene.", "bp", "120/80"),
+        ("blood pressure 120 over 80 on scene.", "bp", "120/80"),
+        ("Patient stable, no vitals called out.", "bp", None),
+        ("heart rate 98 on the monitor.", "hr", 98),
+        ("hr 98 on the monitor.", "hr", 98),
+        ("pulse 98 palpated.", "hr", 98),
+        ("Patient stable, no vitals called out.", "hr", None),
+        ("spo2 96 on room air.", "spo2", 96),
+        ("sats 96 on room air.", "spo2", 96),
+        ("96% on room air.", "spo2", 96),
+        ("Patient stable, no vitals called out.", "spo2", None),
+        ("respiratory rate 18, non-labored.", "rr", 18),
+        ("rr 18, non-labored.", "rr", 18),
+        ("Patient stable, no vitals called out.", "rr", None),
+        ("gcs 15, alert and oriented.", "gcs", 15),
+        ("glasgow coma 15, alert and oriented.", "gcs", 15),
+        ("Patient stable, no vitals called out.", "gcs", None),
+    ],
+)
+def test_mock_chart_vitals_extraction(transcript, field, expected):
+    chart = agents.parse_chart(transcript)
+    assert chart["vitals"][field] == expected
+
+
+# ---------------------- mechanism of injury ---------------------- #
+
+
+def test_mock_chart_mechanism_of_injury_reflects_transcript():
+    chart = agents.parse_chart(
+        "58-year-old male, high-speed MVC with significant vehicular intrusion, "
+        "transported to the trauma center."
+    )
+    assert "MVC" in chart["mechanismOfInjury"]
+    assert chart["mechanismOfInjury"] != "Reported per dictation; see narrative."
+
+
+def test_mock_chart_mechanism_of_injury_falls_back_when_absent():
+    chart = agents.parse_chart("Patient reports chest pain, no trauma history.")
+    assert chart["mechanismOfInjury"] == "Mechanism of injury not stated in dictation."
+
+
+# ------------------------- comorbidities ------------------------- #
+
+
+@pytest.mark.parametrize(
+    "transcript,expected",
+    [
+        ("Patient has a history of diabetes.", ["diabetes"]),
+        ("Patient has COPD and is on home oxygen.", ["COPD"]),
+        ("History of CHF, currently compensated.", ["CHF"]),
+        ("Patient has hypertension, well controlled.", ["hypertension"]),
+        ("Patient is on dialysis for renal failure.", ["renal failure"]),
+        ("Denies any past medical history.", []),
+    ],
+)
+def test_mock_chart_comorbidity_extraction(transcript, expected):
+    chart = agents.parse_chart(transcript)
+    assert chart["comorbidities"] == expected
+
+
+def test_mock_chart_comorbidity_extraction_multiple_no_duplicates():
+    chart = agents.parse_chart(
+        "History of diabetes, COPD, and hypertension; also diabetic per prior chart."
+    )
+    assert chart["comorbidities"] == ["diabetes", "COPD", "hypertension"]
+
+
 def test_mock_ruling_reflects_score():
     strong = _base_chart()
     weak = _base_chart(
@@ -65,6 +160,48 @@ def test_mock_ruling_reflects_score():
     )
     assert agents.rule(mid, "appeal", "policy", biased=False)[0] == "uphold"
     assert agents.rule(mid, "appeal", "policy", biased=True)[0] == "overturn"
+
+
+# ------------------------- policy citation (mock) ------------------------- #
+
+
+@pytest.mark.parametrize("payer", ["AETNA", "MEDICARE"])
+def test_mock_deny_cites_genuine_policy_excerpt(payer):
+    chart = _base_chart(payer=payer, levelOfService="BLS")  # necessity score is low -> CO-50
+    policy = agents.load_policy(payer)
+    content, reason = agents.deny(chart, payer, policy)
+    assert reason == "CO-50"
+    # The denial must quote the policy's own line for this code, not just say the code.
+    excerpt = agents._policy_excerpt_for_reason(policy, "CO-50")
+    assert excerpt is not None
+    assert excerpt in content
+
+
+def test_mock_deny_downgrade_cites_downgrade_excerpt():
+    chart = _base_chart(levelOfService="ALS", vitals={"gcs": 15, "bp": None, "hr": None, "spo2": None, "rr": None}, interventions=[], comorbidities=[], mechanismOfInjury="none")
+    policy = agents.load_policy("AETNA")
+    content, reason = agents.deny(chart, "AETNA", policy)
+    assert reason == "DOWNGRADE"
+    excerpt = agents._policy_excerpt_for_reason(policy, "DOWNGRADE")
+    assert excerpt is not None
+    assert excerpt in content
+
+
+@pytest.mark.parametrize("payer", ["AETNA", "MEDICARE"])
+def test_mock_appeal_cites_genuine_policy_sentence(payer):
+    chart = _base_chart(payer=payer)
+    policy = agents.load_policy(payer)
+    content = agents.appeal(chart, "denial text", policy, escalated=False)
+    basis = agents._policy_basis_sentence(policy, chart)
+    assert basis
+    assert basis in content
+    # It's a real sentence from the policy file, not the old boilerplate line.
+    assert "The cited policy covers transport at the assessed level" not in content
+
+
+def test_policy_excerpt_for_unknown_reason_is_none():
+    policy = agents.load_policy("AETNA")
+    assert agents._policy_excerpt_for_reason(policy, "CO-99") is None
 
 
 # ------------------------- Bedrock parse paths ------------------------- #

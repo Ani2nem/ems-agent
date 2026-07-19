@@ -7,6 +7,7 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 - `docs/api-contract.md` - HTTP interface between frontend and backend. FROZEN.
 - `docs/workflow-contract.md` - negotiation state I/O and the DynamoDB job-record schema (backend <-> infra). FROZEN.
 - `.claude/plans/i-m-trying-to-build-cozy-castle.md` - full architecture, rationale, and product flow.
+- `docs/mock-fidelity-changes.md` - `patient.age` became nullable (was a required `number`); read this if you touch `api-contract.md`, `models.py`, or `frontend/src/types.ts`.
 
 ## Living notes (not frozen, but read before touching related code)
 - `docs/bedrock-live-wiring-notes.md` - findings from running the real Bedrock path against Nova Micro (PR #8, not yet merged): a job-store backend-selection fix relevant to the infra/deploy track, and prompt/parsing gotchas relevant to anyone touching agent prompts or tagged-output parsing.
