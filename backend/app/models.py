@@ -55,3 +55,7 @@ class SubmitClaimRequest(BaseModel):
 class SubmitClaimResponse(BaseModel):
     jobId: str
     status: str
+
+
+class ExportNemsisRequest(BaseModel):
+    chart: EPCRChart
