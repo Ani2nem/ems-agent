@@ -14,7 +14,7 @@ NEMSIS-inspired structured patient care report.
 ```jsonc
 {
   "incidentId": "string",            // e.g. "INC-2026-04837"
-  "patient": { "age": 45, "sex": "M" },
+  "patient": { "age": 45, "sex": "M" },  // age is number|null (not stated in dictation -> null)
   "payer": "AETNA" | "MEDICARE",     // drives payer-based policy retrieval
   "chiefComplaint": "string",
   "mechanismOfInjury": "string",     // clinical phrasing, e.g. "high-speed MVC with significant vehicular intrusion"

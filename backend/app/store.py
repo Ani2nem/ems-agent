@@ -1,10 +1,15 @@
 """Job-record persistence (see ``docs/workflow-contract.md``).
 
-Two backends behind one API, selected by ``USE_BEDROCK``:
+Two backends behind one API, selected the same way ``main._start_workflow``
+picks Step Functions vs. the in-process driver: both ``USE_BEDROCK=true`` AND
+a deployed ``state_machine_arn`` must be present, not ``USE_BEDROCK`` alone -
+``USE_BEDROCK=true`` with no deployed infra (e.g. live-Bedrock local testing)
+must still use the in-process store, per the workflow contract's "USE_BEDROCK=
+false or running locally" invariant.
 
-* mock mode -> a thread-safe in-process dict (background negotiation thread and
-  the request handlers share it).
-* deployed  -> the single DynamoDB ``JobsTable`` (job items keyed by ``jobId``,
+* local (mock OR live-Bedrock-no-infra) -> a thread-safe in-process dict
+  (background negotiation thread and the request handlers share it).
+* deployed -> the single DynamoDB ``JobsTable`` (job items keyed by ``jobId``,
   idempotency items keyed by ``IDEMPOTENCY#<key>``).
 
 Both share the append-only ``rounds`` / ``auditTrail`` semantics the API contract
@@ -186,7 +191,8 @@ _dynamo: Optional[_Dynamo] = None
 
 def _backend():
     global _dynamo
-    if not settings().use_bedrock:
+    cfg = settings()
+    if not (cfg.use_bedrock and cfg.state_machine_arn):
         return _memory
     if _dynamo is None:
         _dynamo = _Dynamo()

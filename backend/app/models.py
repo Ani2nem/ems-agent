@@ -20,7 +20,7 @@ class Vitals(BaseModel):
 
 
 class Patient(BaseModel):
-    age: int
+    age: Optional[int] = None
     sex: str
 
 

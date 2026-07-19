@@ -62,7 +62,7 @@ export function ChartPanel({ chart, parsing, error }: Props) {
           <div className="chart__group">
             <h3 className="chart__heading">Encounter</h3>
             <dl className="field-grid">
-              <Field label="Patient" value={`${chart.patient.age} yo ${chart.patient.sex}`} />
+              <Field label="Patient" value={`${chart.patient.age ?? 'Unknown'} yo ${chart.patient.sex}`} />
               <Field label="Payer" value={<span className="tag tag--payer">{chart.payer}</span>} />
               <Field label="Level of service" value={<span className="tag tag--los">{chart.levelOfService}</span>} />
               <Field label="Transport priority" value={chart.transportPriority} />
