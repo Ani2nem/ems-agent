@@ -32,6 +32,10 @@ class Settings:
     state_machine_arn: str
     enable_ses_email: bool
     escalation_email: str
+    # API Gateway HTTP API stage prefix (e.g. "prod"), stripped from Mangum's
+    # ASGI scope path since API Gateway includes it in rawPath. Empty locally,
+    # where uvicorn serves with no stage prefix.
+    stage_name: str
     # Seconds to pause between negotiation states in local mode, so the frontend
     # poll loop can observe status/round progression. 0 in tests for speed.
     local_step_delay: float
@@ -46,5 +50,6 @@ def settings() -> Settings:
         state_machine_arn=os.getenv("STATE_MACHINE_ARN", ""),
         enable_ses_email=_flag("ENABLE_SES_EMAIL"),
         escalation_email=os.getenv("ESCALATION_EMAIL", ""),
+        stage_name=os.getenv("STAGE_NAME", ""),
         local_step_delay=float(os.getenv("LOCAL_STEP_DELAY_SECONDS", "0")),
     )

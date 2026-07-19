@@ -130,4 +130,7 @@ def _start_workflow(job_id: str, chart: dict) -> None:
 
 
 # Mangum adapter - the Lambda entrypoint referenced by SAM (app.main.handler).
-handler = Mangum(app)
+# API Gateway HTTP API includes the stage name in rawPath (e.g. "/prod/api/...");
+# strip it so FastAPI's routes ("/api/...") match.
+_stage = settings().stage_name
+handler = Mangum(app, api_gateway_base_path=f"/{_stage}" if _stage else "/")

@@ -54,6 +54,7 @@ Globals:
         USE_BEDROCK: !Ref UseBedrock
         ENABLE_SES_EMAIL: !Ref EnableSesEmail
         ESCALATION_EMAIL: !Ref EscalationEmail
+        STAGE_NAME: !Ref StageName
   Api:
     TracingEnabled: true
 
