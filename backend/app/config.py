@@ -51,5 +51,5 @@ def settings() -> Settings:
         enable_ses_email=_flag("ENABLE_SES_EMAIL"),
         escalation_email=os.getenv("ESCALATION_EMAIL", ""),
         stage_name=os.getenv("STAGE_NAME", ""),
-        local_step_delay=float(os.getenv("LOCAL_STEP_DELAY_SECONDS", "0")),
+        local_step_delay=float(os.getenv("LOCAL_STEP_DELAY_SECONDS", "2")),
     )
