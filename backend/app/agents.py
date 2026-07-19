@@ -240,20 +240,38 @@ def _mock_chart(transcript: str) -> dict:
 
 
 def _parse_chart_bedrock(transcript: str) -> dict:
+    # incidentId is assigned by the backend (same deterministic hash as the
+    # mock path), never requested from the model - asked to invent one, a
+    # model that correctly follows "do not invent facts" returns null instead
+    # of a string, which fails the chart's response schema.
     system = (
         "You are an EMS documentation specialist. Convert the paramedic's raw "
         "dictation into a structured NEMSIS-inspired ePCR chart. Respond with a "
         "single JSON object and nothing else, matching exactly these keys: "
-        "incidentId, patient{age,sex}, payer (AETNA or MEDICARE), chiefComplaint, "
+        "patient{age,sex}, payer (AETNA or MEDICARE), chiefComplaint, "
         "mechanismOfInjury, vitals{gcs,bp,hr,spo2,rr}, interventions (array), "
         "comorbidities (array), levelOfService (BLS or ALS), transportPriority, "
         "narrative. Use null for unknown vitals. Do not invent facts."
     )
     raw = bedrock.converse(system, transcript, temperature=0.2)
     try:
-        return json.loads(_strip_code_fence(raw))
+        data = json.loads(_strip_code_fence(raw))
     except (ValueError, TypeError) as exc:
-        raise bedrock.BedrockError(f"could not parse chart JSON: {exc}") from exc
+        repair_user = (
+            f"{transcript}\n\n"
+            f"Your previous response could not be parsed as JSON ({exc}). "
+            "Respond again with ONLY a single valid JSON object - no markdown "
+            "code fences, no commentary, no trailing text."
+        )
+        raw_retry = bedrock.converse(system, repair_user, temperature=0.2)
+        try:
+            data = json.loads(_strip_code_fence(raw_retry))
+        except (ValueError, TypeError) as exc2:
+            raise bedrock.BedrockError(
+                f"could not parse chart JSON after retry: {exc2}"
+            ) from exc2
+    data["incidentId"] = _incident_id(transcript)
+    return data
 
 
 def _strip_code_fence(text: str) -> str:
@@ -481,9 +499,16 @@ def _rule_bedrock(chart: dict, appeal_content: str, policy: str, *, biased: bool
 
 
 def _extract_tag(text: str, tag: str) -> str | None:
-    match = re.search(rf"{tag}\s*:\s*([A-Za-z0-9-]+)", text)
+    match = re.search(rf"\**\s*{tag}\s*:\s*\**\s*([A-Za-z0-9-]+)", text)
     return match.group(1) if match else None
 
 
 def _strip_tag_line(text: str, tag: str) -> str:
-    return re.sub(rf"\n?\s*{tag}\s*:.*$", "", text.strip()).strip()
+    # Real model output doesn't always put the tag on the literal last line -
+    # it sometimes bolds it (``**DECISION: OVERTURN**``) or appends a stray
+    # trailing code fence afterward, neither of which the prompt asks for.
+    # Match the tag's own line anywhere (MULTILINE) rather than anchoring to
+    # end-of-string, and drop any leftover fence markers left behind.
+    text = re.sub(rf"(?m)^\s*\**\s*{tag}\s*:.*$", "", text)
+    text = re.sub(r"^\s*```\s*$", "", text, flags=re.MULTILINE)
+    return text.strip()

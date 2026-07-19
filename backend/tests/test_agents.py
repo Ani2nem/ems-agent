@@ -237,6 +237,24 @@ def test_bedrock_ruling_falls_back_on_unparseable(_bedrock_on, monkeypatch):
     assert agents.rule(_base_chart(), "a", "p", biased=True)[0] == "overturn"
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "## Ruling\n\nSome reasoning.\n\n**DECISION: OVERTURN**",
+        "## Ruling\n\nSome reasoning.\n\n**Final Decision:**\nDECISION: OVERTURN\n```",
+        "## Ruling\n\nSome reasoning.\n\n**DECISION: OVERTURN**\n```",
+    ],
+)
+def test_bedrock_ruling_strips_tag_despite_bold_and_trailing_fence(_bedrock_on, monkeypatch, raw):
+    """Real Nova Micro output sometimes bolds the tag and/or appends a stray
+    trailing code fence after it; the tag line must still be fully stripped."""
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: raw)
+    decision, content = agents.rule(_base_chart(), "appeal", "policy", biased=False)
+    assert decision == "overturn"
+    assert "DECISION" not in content
+    assert "```" not in content
+
+
 def test_bedrock_parse_chart_invalid_json_raises_502_error(_bedrock_on, monkeypatch):
     monkeypatch.setattr(bedrock, "converse", lambda *a, **k: "not json")
     with pytest.raises(bedrock.BedrockError):
