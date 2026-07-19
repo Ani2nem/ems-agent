@@ -7,6 +7,7 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 - `docs/api-contract.md` - HTTP interface between frontend and backend. FROZEN.
 - `docs/workflow-contract.md` - negotiation state I/O and the DynamoDB job-record schema (backend <-> infra). FROZEN.
 - `.claude/plans/i-m-trying-to-build-cozy-castle.md` - full architecture, rationale, and product flow.
+- `docs/mock-fidelity-changes.md` - `patient.age` became nullable (was a required `number`); read this if you touch `api-contract.md`, `models.py`, or `frontend/src/types.ts`.
 
 ## Tech stack
 - **Backend:** Python 3.12, FastAPI + Mangum (on Lambda), boto3 Bedrock **Converse** API.
