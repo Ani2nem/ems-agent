@@ -1,0 +1,34 @@
+name: validate
+
+# PR gate: static validation of the SAM template. Needs no AWS credentials,
+# so it runs safely on pull requests from any branch.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validators
+        run: pip install aws-sam-cli cfn-lint
+
+      - name: cfn-lint
+        run: cfn-lint infra/template.yaml
+
+      - name: sam validate --lint
+        working-directory: infra
+        run: sam validate --lint
+
+      - name: State machine JSON parses
+        run: python -m json.tool infra/statemachine/negotiation.asl.json > /dev/null
