@@ -1,0 +1,32 @@
+CMS / MEDICARE - Ambulance Services Medical Necessity (public reference excerpt)
+
+Coverage principle
+  Medicare covers ambulance transport only when using any other means of
+  transportation would endanger the patient's health. The patient's condition
+  at the time of transport must require the vehicle and the level of service
+  billed. Coverage is condition-based, not diagnosis-based.
+
+Levels of service
+  BLS (Basic Life Support): transport plus basic, non-invasive interventions.
+  ALS (Advanced Life Support): required when the patient's condition warrants an
+  ALS assessment or one or more ALS interventions (e.g., cardiac monitoring,
+  IV access with medication administration, advanced airway management). An ALS
+  assessment performed by ALS-qualified personnel to determine the patient's
+  need for an ALS intervention supports an ALS-level claim even if no ALS
+  intervention is ultimately furnished, provided the dispatch was warranted by
+  the reported condition.
+
+Medical necessity indicators
+  Emergent (Priority 1) dispatch, altered mental status (GCS < 15), unstable
+  vitals, significant mechanism of injury, or the need for monitoring or
+  medications en route support medical necessity for emergency ambulance
+  transport at the assessed level of service.
+
+Common denial reasons
+  CO-50  Non-covered: service not deemed medically necessary for the condition.
+  CO-16  Claim lacks information required for adjudication.
+  CO-11  Diagnosis inconsistent with the procedure/level billed.
+
+Downcoding
+  When documentation supports transport but not the ALS level billed, the payer
+  may reimburse at the BLS level (DOWNGRADE) rather than deny outright.
