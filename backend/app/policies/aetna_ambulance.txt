@@ -1,0 +1,27 @@
+AETNA - Ambulance Services Clinical Policy Bulletin (public reference excerpt)
+
+Medical necessity
+  Aetna considers emergency ambulance transport medically necessary when the
+  member's condition is such that any other method of transport is
+  contraindicated, and transport is to the nearest facility able to treat the
+  condition. Advanced Life Support (ALS) is covered when the member's reported
+  or observed condition requires ALS assessment or ALS-level interventions.
+
+ALS-supporting criteria
+  Cardiac monitoring, IV access with medication administration, advanced airway
+  management, or evidence of hemodynamic or neurologic instability. A high-acuity
+  dispatch (Priority 1 / emergent) together with a significant mechanism of
+  injury or an abnormal presentation (e.g., GCS < 15, hypotension, hypoxia)
+  supports the ALS level of service.
+
+Documentation
+  The patient care report should describe the condition that required transport,
+  the interventions performed en route, and why a lower level of transport would
+  have endangered the member. Contemporaneous vitals and a clear narrative are
+  expected.
+
+Adjudication codes
+  CO-50  Not medically necessary for the documented condition.
+  CO-16  Missing or incomplete information.
+  CO-11  Diagnosis inconsistent with the level of service billed.
+  DOWNGRADE  Transport supported at BLS rather than the ALS level submitted.
