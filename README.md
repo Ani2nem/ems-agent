@@ -34,6 +34,13 @@ USE_BEDROCK=false uvicorn app.main:app --reload --port 8000
 cd frontend && npm install && npm run dev
 ```
 
+## NEMSIS export
+
+`POST /api/export-nemsis` exports a chart as NEMSIS v3.5-shaped XML - a
+scoped, additive feature alongside the JSON chart, not a certified/
+registry-submittable file. See `docs/nemsis-export.md` for the element
+mapping and explicit limitations.
+
 ## Notes
 
 - **Models** are configured per-agent (Nova Micro everywhere in v1) and swappable via SSM/env.

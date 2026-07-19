@@ -49,5 +49,6 @@ The backend is stateless (the chart round-trips through the client). No datastor
 - **Synthetic data only.** Real payer policy text (CMS, Aetna) is public reference material, not billing/legal advice.
 - **Cost guardrails:** no VPC/NAT, no provisioned concurrency, no Secrets Manager (use SSM Parameter Store), nothing always-on.
 - **Local dev must run with `USE_BEDROCK=false`** (mock fallback). Never require AWS credentials to run or test.
+- **NEMSIS v3.5 XML export** (`POST /api/export-nemsis`) is a scoped, additive feature layered on the frozen `ePCRChart` shape - see `docs/nemsis-export.md` for the element mapping and explicit limitations (well-formed, not a certified/registry-submittable file).
 - **Keep this file under 150 lines.** New context goes in a `docs/<topic>.md` with a one-line pointer here (progressive disclosure); do not bloat this file.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`, `docs:`). Do not add AI co-author trailers. Use plain dashes, never em dashes.

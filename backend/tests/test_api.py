@@ -2,6 +2,7 @@
 
 import time
 import uuid
+import xml.etree.ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,6 +60,23 @@ def test_parse_audio_empty_transcript_is_400():
 
 def test_parse_audio_missing_field_is_400():
     resp = client.post("/api/parse-audio", json={})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+# --------------------------- export-nemsis --------------------------- #
+
+
+def test_export_nemsis_returns_well_formed_xml(strong_chart):
+    resp = client.post("/api/export-nemsis", json={"chart": strong_chart})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/xml")
+    root = ET.fromstring(resp.content)  # raises if not well-formed
+    assert root.tag.endswith("PatientCareReport")
+
+
+def test_export_nemsis_invalid_chart_is_400():
+    resp = client.post("/api/export-nemsis", json={"chart": {"payer": "AETNA"}})
     assert resp.status_code == 400
     assert "error" in resp.json()
 
