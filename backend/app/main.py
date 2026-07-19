@@ -11,15 +11,16 @@ import json
 import threading
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mangum import Mangum
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import agents, negotiation, store
+from . import agents, negotiation, nemsis_export, store
 from .config import settings
 from .models import (
+    ExportNemsisRequest,
     ParseAudioRequest,
     ParseAudioResponse,
     SubmitClaimRequest,
@@ -72,6 +73,14 @@ def parse_audio(body: ParseAudioRequest):
     except BedrockError as exc:
         return _error(502, f"model failure: {exc}")
     return {"chartId": str(uuid.uuid4()), "chart": chart}
+
+
+@app.post("/api/export-nemsis")
+def export_nemsis(body: ExportNemsisRequest):
+    """Additive path (docs/nemsis-export.md) - does not change the frozen
+    ePCRChart JSON shape in docs/api-contract.md."""
+    xml_bytes = nemsis_export.to_nemsis_xml(body.chart.model_dump())
+    return Response(content=xml_bytes, media_type="application/xml")
 
 
 @app.post("/api/submit-claim", status_code=202, response_model=SubmitClaimResponse)

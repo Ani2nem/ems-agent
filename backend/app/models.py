@@ -20,7 +20,7 @@ class Vitals(BaseModel):
 
 
 class Patient(BaseModel):
-    age: int
+    age: Optional[int] = None
     sex: str
 
 
@@ -55,3 +55,7 @@ class SubmitClaimRequest(BaseModel):
 class SubmitClaimResponse(BaseModel):
     jobId: str
     status: str
+
+
+class ExportNemsisRequest(BaseModel):
+    chart: EPCRChart

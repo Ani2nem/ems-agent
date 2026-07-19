@@ -8,27 +8,17 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 - `docs/workflow-contract.md` - negotiation state I/O and the DynamoDB job-record schema (backend <-> infra). FROZEN.
 - `docs/deploy-validation-notes.md` - bugs only visible behind a real `sam deploy` (API Gateway stage-prefix stripping, `deploy.yml` optional param overrides) and the manual `scripts/smoke-deployed.sh` smoke test. Read before touching Mangum/`main.py` or `deploy.yml`.
 - `.claude/plans/i-m-trying-to-build-cozy-castle.md` - full architecture, rationale, and product flow.
+- `docs/mock-fidelity-changes.md` - `patient.age` became nullable (was a required `number`); read this if you touch `api-contract.md`, `models.py`, or `frontend/src/types.ts`.
 
-## Tech stack
-- **Backend:** Python 3.12, FastAPI + Mangum (on Lambda), boto3 Bedrock **Converse** API.
-- **AI model:** Amazon **Nova Micro** (`amazon.nova-micro-v1:0`) for every agent in v1. Each agent's model id is config (SSM/env), swappable independently later.
-- **Frontend:** React + Vite (TypeScript).
-- **Infra:** AWS SAM - API Gateway HTTP API, Lambda, Step Functions, DynamoDB (on-demand + TTL), X-Ray. No VPC/NAT.
-- **CI/CD:** GitHub Actions via OIDC assume-role (no stored AWS keys).
+## Living notes (not frozen, but read before touching related code)
+- `docs/bedrock-live-wiring-notes.md` - findings from running the real Bedrock path against Nova Micro (PR #8, not yet merged): a job-store backend-selection fix relevant to the infra/deploy track, and prompt/parsing gotchas relevant to anyone touching agent prompts or tagged-output parsing.
 
 ## Architecture (one line)
 React SPA (S3+CloudFront) -> HTTP API -> Lambda (FastAPI) -> Step Functions negotiation -> Bedrock (Nova) -> DynamoDB; the frontend polls for progress. Two adversarial agents (Payer vs Defense) run a capped 2-round negotiation with an escalate-to-human fallback.
 
-## Repo layout
-- `frontend/` - React + Vite SPA
-- `backend/` - FastAPI app, Bedrock wrapper, agents, Step Functions task handlers, policy files
-- `infra/` - SAM `template.yaml` + Step Functions ASL
-- `docs/` - frozen contracts and reference docs
-- `.github/workflows/` - CI/CD
-
 ## Build / dev / test
 **Backend**
-- Install: `cd backend && pip install -r requirements.txt -r requirements-dev.txt`
+- Install: `cd backend && pip install -r requirements.txt -r requirements-dev.txt` (if this fails building `pydantic-core`, see `docs/dev-notes.md` - your `python3` may not be 3.12)
 - Local (free, no AWS): `cd backend && USE_BEDROCK=false uvicorn app.main:app --reload --port 8000`
 - Test: `cd backend && pytest -q`
 
@@ -50,5 +40,6 @@ The backend is stateless (the chart round-trips through the client). No datastor
 - **Synthetic data only.** Real payer policy text (CMS, Aetna) is public reference material, not billing/legal advice.
 - **Cost guardrails:** no VPC/NAT, no provisioned concurrency, no Secrets Manager (use SSM Parameter Store), nothing always-on.
 - **Local dev must run with `USE_BEDROCK=false`** (mock fallback). Never require AWS credentials to run or test.
+- **NEMSIS v3.5 XML export** (`POST /api/export-nemsis`) is a scoped, additive feature layered on the frozen `ePCRChart` shape - see `docs/nemsis-export.md` for the element mapping and explicit limitations (well-formed, not a certified/registry-submittable file).
 - **Keep this file under 150 lines.** New context goes in a `docs/<topic>.md` with a one-line pointer here (progressive disclosure); do not bloat this file.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`, `docs:`). Do not add AI co-author trailers. Use plain dashes, never em dashes.
