@@ -1,0 +1,77 @@
+{
+  "Comment": "EMS Agent negotiation - Payer vs Defense, capped at 2 rounds. SKELETON: Workstream C wires real Lambda ARNs via SAM substitutions and Workstream A implements the task handlers. Each task Lambda reads/writes the DynamoDB job record and returns the merged state.",
+  "StartAt": "SimulateClearinghouse",
+  "States": {
+    "SimulateClearinghouse": {
+      "Type": "Wait",
+      "Seconds": 2,
+      "Comment": "Simulates the ~30-day clearinghouse loop, compressed.",
+      "Next": "Deny"
+    },
+    "Deny": {
+      "Type": "Task",
+      "Resource": "${DenyFunctionArn}",
+      "Comment": "Payer agent issues a dynamic denial (reason code + rationale).",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+      "Next": "Appeal"
+    },
+    "Appeal": {
+      "Type": "Task",
+      "Resource": "${AppealFunctionArn}",
+      "Comment": "Defense agent writes the cited appeal.",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+      "Next": "ReReview"
+    },
+    "ReReview": {
+      "Type": "Task",
+      "Resource": "${ReReviewFunctionArn}",
+      "Comment": "Payer re-reviews the appeal; sets decision = overturn | uphold.",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+      "Next": "DecisionChoice"
+    },
+    "DecisionChoice": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.decision", "StringEquals": "overturn", "Next": "Resolve" },
+        { "And": [
+            { "Variable": "$.decision", "StringEquals": "uphold" },
+            { "Variable": "$.round", "NumericLessThan": 2 }
+          ], "Next": "EscalateAppeal" }
+      ],
+      "Default": "EscalateHuman"
+    },
+    "EscalateAppeal": {
+      "Type": "Task",
+      "Resource": "${AppealFunctionArn}",
+      "Comment": "Round 2: defense escalates the appeal.",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+      "Next": "FinalRuling"
+    },
+    "FinalRuling": {
+      "Type": "Task",
+      "Resource": "${FinalRulingFunctionArn}",
+      "Comment": "Payer final ruling, prompt-biased toward overturn; sets decision.",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+      "Next": "FinalChoice"
+    },
+    "FinalChoice": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.decision", "StringEquals": "overturn", "Next": "Resolve" }
+      ],
+      "Default": "EscalateHuman"
+    },
+    "Resolve": {
+      "Type": "Task",
+      "Resource": "${ResolveFunctionArn}",
+      "Comment": "Marks job RESOLVED / OVERTURNED.",
+      "End": true
+    },
+    "EscalateHuman": {
+      "Type": "Task",
+      "Resource": "${EscalateFunctionArn}",
+      "Comment": "Marks job ESCALATED; optional SES email behind ENABLE_SES_EMAIL flag.",
+      "End": true
+    }
+  }
+}

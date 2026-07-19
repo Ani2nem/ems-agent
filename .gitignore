@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.local
+
+# SAM / AWS
+.aws-sam/
+samconfig.local.toml
+packaged.yaml
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Claude (personal/local settings only; share CLAUDE.md and .claude/settings.json)
+.claude/settings.local.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
