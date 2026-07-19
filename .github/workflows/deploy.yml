@@ -54,19 +54,29 @@ jobs:
 
       - name: Deploy
         working-directory: infra
-        run: >
-          sam deploy
-          --stack-name "$STACK_NAME"
-          --region "$AWS_REGION"
-          --capabilities CAPABILITY_IAM
-          --resolve-s3
-          --no-confirm-changeset
-          --no-fail-on-empty-changeset
-          --parameter-overrides
-          StageName=prod
-          BudgetAlertEmail=${{ vars.BUDGET_ALERT_EMAIL }}
-          EnableSesEmail=${{ vars.ENABLE_SES_EMAIL || 'false' }}
-          EscalationEmail=${{ vars.ESCALATION_EMAIL }}
+        env:
+          BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL }}
+          ENABLE_SES_EMAIL: ${{ vars.ENABLE_SES_EMAIL || 'false' }}
+          ESCALATION_EMAIL: ${{ vars.ESCALATION_EMAIL }}
+        run: |
+          # SAM CLI's shorthand --parameter-overrides rejects Key= with an empty
+          # value, so omit optional overrides entirely when unset (the template's
+          # own Default already covers them) instead of passing them empty.
+          OVERRIDES="StageName=prod EnableSesEmail=${ENABLE_SES_EMAIL}"
+          if [ -n "$BUDGET_ALERT_EMAIL" ]; then
+            OVERRIDES="$OVERRIDES BudgetAlertEmail=${BUDGET_ALERT_EMAIL}"
+          fi
+          if [ -n "$ESCALATION_EMAIL" ]; then
+            OVERRIDES="$OVERRIDES EscalationEmail=${ESCALATION_EMAIL}"
+          fi
+          sam deploy \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides $OVERRIDES
 
       # --- Publish the built SPA to S3 + invalidate CloudFront ---
       # Skips cleanly until Workstream B lands frontend/package.json.

@@ -6,6 +6,7 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 ## Frozen sources of truth - do NOT change these shapes without updating the doc and flagging it in your PR
 - `docs/api-contract.md` - HTTP interface between frontend and backend. FROZEN.
 - `docs/workflow-contract.md` - negotiation state I/O and the DynamoDB job-record schema (backend <-> infra). FROZEN.
+- `docs/deploy-validation-notes.md` - bugs only visible behind a real `sam deploy` (API Gateway stage-prefix stripping, `deploy.yml` optional param overrides) and the manual `scripts/smoke-deployed.sh` smoke test. Read before touching Mangum/`main.py` or `deploy.yml`.
 - `.claude/plans/i-m-trying-to-build-cozy-castle.md` - full architecture, rationale, and product flow.
 - `docs/mock-fidelity-changes.md` - `patient.age` became nullable (was a required `number`); read this if you touch `api-contract.md`, `models.py`, or `frontend/src/types.ts`.
 
