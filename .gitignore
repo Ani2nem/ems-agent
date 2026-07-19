@@ -14,6 +14,7 @@ frontend/dist/
 
 # SAM / AWS
 .aws-sam/
+samconfig.toml
 samconfig.local.toml
 packaged.yaml
 

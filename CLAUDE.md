@@ -11,16 +11,31 @@ Production-shaped serverless, built deliberately cheap (target: well under $10 t
 - `docs/mock-fidelity-changes.md` - `patient.age` became nullable (was a required `number`); read this if you touch `api-contract.md`, `models.py`, or `frontend/src/types.ts`.
 
 ## Living notes (not frozen, but read before touching related code)
-- `docs/bedrock-live-wiring-notes.md` - findings from running the real Bedrock path against Nova Micro (PR #8, not yet merged): a job-store backend-selection fix relevant to the infra/deploy track, and prompt/parsing gotchas relevant to anyone touching agent prompts or tagged-output parsing.
+- `docs/bedrock-live-wiring-notes.md` - findings from running the real Bedrock path against Nova Micro: a job-store backend-selection fix relevant to the infra/deploy track, and prompt/parsing gotchas relevant to anyone touching agent prompts or tagged-output parsing.
+
+## Tech stack
+- **Backend:** Python 3.12, FastAPI + Mangum (on Lambda), boto3 Bedrock **Converse** API.
+- **AI model:** Amazon **Nova Micro** (`amazon.nova-micro-v1:0`) for every agent in v1. Each agent's model id is config (SSM/env), swappable independently later.
+- **Frontend:** React + Vite (TypeScript).
+- **Infra:** AWS SAM - API Gateway HTTP API, Lambda, Step Functions, DynamoDB (on-demand + TTL), X-Ray. No VPC/NAT.
+- **CI/CD:** GitHub Actions via OIDC assume-role (no stored AWS keys).
 
 ## Architecture (one line)
 React SPA (S3+CloudFront) -> HTTP API -> Lambda (FastAPI) -> Step Functions negotiation -> Bedrock (Nova) -> DynamoDB; the frontend polls for progress. Two adversarial agents (Payer vs Defense) run a capped 2-round negotiation with an escalate-to-human fallback.
+
+## Repo layout
+- `frontend/` - React + Vite SPA
+- `backend/` - FastAPI app, Bedrock wrapper, agents, Step Functions task handlers, policy files
+- `infra/` - SAM `template.yaml` + Step Functions ASL
+- `scripts/` - manual/ops scripts (e.g. `smoke-deployed.sh` against a live stack)
+- `docs/` - frozen contracts and reference docs
+- `.github/workflows/` - CI/CD
 
 ## Build / dev / test
 **Backend**
 - Install: `cd backend && pip install -r requirements.txt -r requirements-dev.txt` (if this fails building `pydantic-core`, see `docs/dev-notes.md` - your `python3` may not be 3.12)
 - Local (free, no AWS): `cd backend && USE_BEDROCK=false uvicorn app.main:app --reload --port 8000`
-- Test: `cd backend && pytest -q`
+- Test: `cd backend && python -m pytest -q` (bare `pytest` can miss the `app` package depending on how it's invoked - `python -m pytest` always works)
 
 **Frontend**
 - Install + dev: `cd frontend && npm install && npm run dev` (Vite proxies `/api` -> `http://localhost:8000`)
