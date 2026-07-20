@@ -373,7 +373,7 @@ def _deny_bedrock(chart: dict, payer: str, policy: str) -> tuple[str, str]:
     )
     user = f"POLICY:\n{policy}\n\nCHART:\n{json.dumps(chart)}"
     raw = bedrock.converse(system, user)
-    reason = _extract_tag(raw, "REASON") or "CO-50"
+    reason = (_extract_tag(raw, "REASON") or "").upper() or "CO-50"
     if reason not in {"CO-50", "CO-16", "CO-11", "DOWNGRADE"}:
         reason = "CO-50"
     content = _strip_tag_line(raw, "REASON")
@@ -511,7 +511,24 @@ def _rule_bedrock(chart: dict, appeal_content: str, policy: str, *, biased: bool
 
 
 def _extract_tag(text: str, tag: str) -> str | None:
-    match = re.search(rf"\**\s*{tag}\s*:\s*\**\s*([A-Za-z0-9-]+)", text)
+    # Case-insensitive: the prompt asks for the tag name in caps
+    # (``DECISION:``), but real Nova Micro output sometimes writes it in
+    # title case instead (``Decision:``), especially inline in a markdown
+    # summary section. A case-sensitive match silently misses that, falling
+    # back to the caller's default decision/reason instead of the model's
+    # real one - found live, on a ruling whose content plainly said
+    # "**Decision: OVERTURN**" but was still treated as an uphold.
+    #
+    # [ \t]* (not \s*) between the colon and the captured value, deliberately:
+    # real output sometimes has a decoy heading using the tag word as normal
+    # English before the real tag line, e.g. "**Final Decision:**\nDECISION:
+    # OVERTURN" - with \s* (which matches newlines), case-insensitive
+    # matching latches onto the decoy's colon and reaches across the
+    # newline to capture the literal word "DECISION" off the next line as
+    # if it were the value. Restricting to same-line whitespace makes the
+    # decoy correctly fail to match (nothing valid follows its colon on
+    # that same line), so the search continues on to the real tag line.
+    match = re.search(rf"\**[ \t]*{tag}[ \t]*:[ \t]*\**[ \t]*([A-Za-z0-9-]+)", text, re.IGNORECASE)
     return match.group(1) if match else None
 
 
@@ -520,7 +537,9 @@ def _strip_tag_line(text: str, tag: str) -> str:
     # it sometimes bolds it (``**DECISION: OVERTURN**``) or appends a stray
     # trailing code fence afterward, neither of which the prompt asks for.
     # Match the tag's own line anywhere (MULTILINE) rather than anchoring to
-    # end-of-string, and drop any leftover fence markers left behind.
-    text = re.sub(rf"(?m)^\s*\**\s*{tag}\s*:.*$", "", text)
+    # end-of-string, and drop any leftover fence markers left behind. Case-
+    # insensitive for the same reason as _extract_tag above - otherwise a
+    # title-case tag line survives unstripped in the displayed content.
+    text = re.sub(rf"(?m)^\s*\**\s*{tag}\s*:.*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^\s*```\s*$", "", text, flags=re.MULTILINE)
     return text.strip()

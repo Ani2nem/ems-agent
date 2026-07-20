@@ -245,6 +245,19 @@ def test_bedrock_denial_parses_reason_tag(_bedrock_on, monkeypatch):
     assert "REASON:" not in content
 
 
+def test_bedrock_denial_parses_reason_tag_title_case_and_lowercase_value(_bedrock_on, monkeypatch):
+    """Real Nova Micro output doesn't always match the prompt's exact casing -
+    found live on a ruling that said "Decision: OVERTURN" (title case) and
+    was silently treated as the wrong default instead. Same class of bug is
+    possible on the reason tag/value, covered here."""
+    monkeypatch.setattr(
+        bedrock, "converse", lambda *a, **k: "Denied per policy.\nReason: downgrade"
+    )
+    content, reason = agents.deny(_base_chart(), "AETNA", "policy")
+    assert reason == "DOWNGRADE"
+    assert "Reason:" not in content
+
+
 def test_bedrock_ruling_parses_decision_tag(_bedrock_on, monkeypatch):
     monkeypatch.setattr(
         bedrock, "converse", lambda *a, **k: "## Ruling\nApproved.\nDECISION: OVERTURN"
@@ -252,6 +265,21 @@ def test_bedrock_ruling_parses_decision_tag(_bedrock_on, monkeypatch):
     decision, content = agents.rule(_base_chart(), "appeal", "policy", biased=False)
     assert decision == "overturn"
     assert "DECISION:" not in content
+
+
+def test_bedrock_ruling_parses_decision_tag_title_case(_bedrock_on, monkeypatch):
+    """Regression test for the exact bug found live: a round-1 (unbiased)
+    ruling whose content plainly said "**Decision: OVERTURN**" was still
+    treated as an uphold, because the old case-sensitive match only
+    recognized the all-caps "DECISION:" the prompt asks for, silently
+    falling back to the unbiased default (uphold) instead of the model's
+    real decision - forcing an unnecessary round-2 escalation."""
+    monkeypatch.setattr(
+        bedrock, "converse", lambda *a, **k: "## Ruling\n\n**Decision: OVERTURN**"
+    )
+    decision, content = agents.rule(_base_chart(), "appeal", "policy", biased=False)
+    assert decision == "overturn"
+    assert "Decision" not in content
 
 
 def test_bedrock_ruling_falls_back_on_unparseable(_bedrock_on, monkeypatch):
