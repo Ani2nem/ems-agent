@@ -126,8 +126,11 @@ def final_ruling(event, context=None):
 
 def resolve(event, context=None):
     state = event
-    job_id = state["jobId"]
-    store.update_status(job_id, "RESOLVED", outcome="OVERTURNED")
+    job_id, chart = state["jobId"], state["chart"]
+    # Overturned means the original billed amount stands - whether the
+    # denial was a full CO-50 necessity denial or an ALS->BLS DOWNGRADE, an
+    # "overturn" reverses it entirely.
+    store.update_status(job_id, "RESOLVED", outcome="OVERTURNED", recovered_amount=chart["billedAmount"])
     store.append_audit(job_id, "Denial overturned - revenue recovered")
     return state
 
@@ -135,7 +138,16 @@ def resolve(event, context=None):
 def escalate(event, context=None):
     state = event
     job_id = state["jobId"]
-    store.update_status(job_id, "ESCALATED", outcome="ESCALATED")
+    # A DOWNGRADE denial only ever contests the ALS differential - the BLS
+    # base rate was never in dispute, so it's still recovered even when the
+    # ALS appeal itself fails and escalates. Any other denial reason means
+    # nothing is recovered automatically.
+    job = store.get_job(job_id)
+    denial = _last_round(job, "denial")
+    reason_code = denial["reasonCode"] if denial else None
+    recovered = agents.rate_for("BLS") if reason_code == "DOWNGRADE" else 0
+
+    store.update_status(job_id, "ESCALATED", outcome="ESCALATED", recovered_amount=recovered)
     store.append_audit(job_id, "Escalated for human review")
 
     cfg = settings()

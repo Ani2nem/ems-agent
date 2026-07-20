@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { formatUsd } from '../format';
 import type { ePCRChart } from '../types';
 
 interface Props {
@@ -66,6 +67,7 @@ export function ChartPanel({ chart, parsing, error }: Props) {
               <Field label="Payer" value={<span className="tag tag--payer">{chart.payer}</span>} />
               <Field label="Level of service" value={<span className="tag tag--los">{chart.levelOfService}</span>} />
               <Field label="Transport priority" value={chart.transportPriority} />
+              <Field label="Billed amount" value={formatUsd(chart.billedAmount)} />
             </dl>
           </div>
 

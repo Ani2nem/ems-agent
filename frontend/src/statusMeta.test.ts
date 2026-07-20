@@ -33,4 +33,27 @@ describe('statusMeta', () => {
     expect(statusMeta('RESOLVED', 'OVERTURNED').detail).toMatch(/overturned/i);
     expect(statusMeta('RESOLVED', 'OVERTURNED').tone).toBe('success');
   });
+
+  it('shows the recovered dollar amount when resolved', () => {
+    expect(statusMeta('RESOLVED', 'OVERTURNED', 900).detail).toMatch(/\$900 recovered/);
+  });
+
+  it('falls back to the plain resolved copy when no amount is given', () => {
+    // Backward-compatible: callers that don't pass recoveredAmount (e.g. the
+    // existing tests above) still get sensible copy, not "undefined".
+    expect(statusMeta('RESOLVED', 'OVERTURNED').detail).not.toMatch(/\$/);
+  });
+
+  it('shows a partial-recovery message when escalated with a nonzero amount', () => {
+    const detail = statusMeta('ESCALATED', 'ESCALATED', 500, 900).detail;
+    expect(detail).toMatch(/\$500/);
+    expect(detail).toMatch(/\$900/);
+    expect(detail).toMatch(/human review/i);
+  });
+
+  it('keeps the original capped-negotiation copy when escalated with nothing recovered', () => {
+    const detail = statusMeta('ESCALATED', 'ESCALATED', 0, 900).detail;
+    expect(detail).not.toMatch(/\$/);
+    expect(detail).toMatch(/capped without resolution/i);
+  });
 });

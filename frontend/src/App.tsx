@@ -124,7 +124,12 @@ export default function App() {
 
       {submitted && job && (
         <section className="negotiation" aria-label="Negotiation progress">
-          <NegotiationBanner status={job.status} outcome={job.outcome} />
+          <NegotiationBanner
+            status={job.status}
+            outcome={job.outcome}
+            recoveredAmount={job.recoveredAmount}
+            billedAmount={chart?.billedAmount}
+          />
           {pollError && <p className="app__alert" role="alert">{pollError}</p>}
           <div className="negotiation__body">
             <NegotiationRounds rounds={job.rounds} />

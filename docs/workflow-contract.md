@@ -47,8 +47,8 @@ job record (rounds / auditTrail) and updates `status`. Handlers call Bedrock via
 | `appeal` | chart, denial, policy | - | status=`APPEALING`; append appeal round + audit |
 | `rereview` | chart, appeal, policy | `decision` | status=`NEGOTIATING`; append ruling round + audit |
 | `final_ruling` | chart, appeal, policy | `decision` (prompt-biased to overturn) | append final ruling round + audit |
-| `resolve` | - | - | status=`RESOLVED`, outcome=`OVERTURNED`; audit |
-| `escalate` | - | - | status=`ESCALATED`, outcome=`ESCALATED`; audit; optional SES email if `ENABLE_SES_EMAIL=true` |
+| `resolve` | chart | - | status=`RESOLVED`, outcome=`OVERTURNED`, recoveredAmount=`chart.billedAmount`; audit |
+| `escalate` | chart, denial | - | status=`ESCALATED`, outcome=`ESCALATED`, recoveredAmount=BLS rate if the original denial was `DOWNGRADE` else `0`; audit; optional SES email if `ENABLE_SES_EMAIL=true` |
 
 `EscalateAppeal` reuses the `appeal` handler; it must set `round=2`.
 
@@ -64,6 +64,7 @@ Two item kinds share the table:
   "chart": ePCRChart,
   "rounds": [ NegotiationRound ],       // append-only, ordered
   "outcome": Outcome,                   // null until terminal
+  "recoveredAmount": number|null,       // null until terminal; see api-contract.md "Recovery amounts"
   "auditTrail": [ AuditEntry ],         // append-only, ordered
   "createdAt": "ISO-8601",
   "updatedAt": "ISO-8601",

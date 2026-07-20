@@ -23,6 +23,7 @@ export interface ePCRChart {
   levelOfService: LevelOfService;
   transportPriority: string;
   narrative: string;
+  billedAmount: number;
 }
 
 export type NegotiationActor = 'payer' | 'defense';
@@ -75,5 +76,6 @@ export interface JobState {
   status: JobStatus;
   rounds: NegotiationRound[];
   outcome: Outcome;
+  recoveredAmount: number | null;
   auditTrail: AuditEntry[];
 }

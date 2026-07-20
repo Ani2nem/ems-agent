@@ -23,6 +23,11 @@ def test_necessity_score_bounds():
     assert agents.necessity_score(weak) == 0
 
 
+def test_rate_for_known_levels():
+    assert agents.rate_for("BLS") == 500
+    assert agents.rate_for("ALS") == 900
+
+
 def test_policy_loads_per_payer():
     assert "MEDICARE" in agents.load_policy("MEDICARE")
     assert "AETNA" in agents.load_policy("AETNA")
@@ -92,6 +97,25 @@ def test_mock_chart_age_extraction(transcript, expected_age):
 def test_mock_chart_vitals_extraction(transcript, field, expected):
     chart = agents.parse_chart(transcript)
     assert chart["vitals"][field] == expected
+
+
+# ---------------------------- billed amount ---------------------------- #
+
+
+@pytest.mark.parametrize(
+    "transcript,expected_level,expected_billed",
+    [
+        ("Patient assessed, ambulatory, no interventions performed.", "BLS", 500),
+        ("Cardiac monitoring and IV access performed en route.", "ALS", 900),
+    ],
+)
+def test_mock_chart_billed_amount_by_level_of_service(transcript, expected_level, expected_billed):
+    chart = agents.parse_chart(transcript)
+    assert chart["levelOfService"] == expected_level
+    assert chart["billedAmount"] == expected_billed
+    from app.models import EPCRChart
+
+    EPCRChart.model_validate(chart)
 
 
 # ---------------------- mechanism of injury ---------------------- #

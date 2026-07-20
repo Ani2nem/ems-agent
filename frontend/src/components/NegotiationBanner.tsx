@@ -4,6 +4,8 @@ import type { JobStatus, Outcome } from '../types';
 interface Props {
   status: JobStatus;
   outcome: Outcome;
+  recoveredAmount?: number | null;
+  billedAmount?: number;
 }
 
 /**
@@ -11,8 +13,8 @@ interface Props {
  * the negotiation progresses (progress -> danger -> success, etc). The `key` on
  * the root drives the enter transition on every status change.
  */
-export function NegotiationBanner({ status, outcome }: Props) {
-  const meta = statusMeta(status, outcome);
+export function NegotiationBanner({ status, outcome, recoveredAmount, billedAmount }: Props) {
+  const meta = statusMeta(status, outcome, recoveredAmount, billedAmount);
   return (
     <div
       key={status}

@@ -7,7 +7,7 @@ os.environ.setdefault("LOCAL_STEP_DELAY_SECONDS", "0")
 
 import pytest
 
-from app import store
+from app import agents, store
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +32,7 @@ def _base_chart(**overrides) -> dict:
         "narrative": "Emergent ALS transport of a patient with chest pain.",
     }
     chart.update(overrides)
+    chart.setdefault("billedAmount", agents.rate_for(chart["levelOfService"]))
     return chart
 
 

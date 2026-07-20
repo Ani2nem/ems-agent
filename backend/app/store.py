@@ -66,6 +66,7 @@ class _Memory:
                 "chart": chart,
                 "rounds": [],
                 "outcome": None,
+                "recoveredAmount": None,
                 "auditTrail": [],
                 "createdAt": now,
                 "updatedAt": now,
@@ -89,12 +90,20 @@ class _Memory:
             job["auditTrail"].append({"ts": _now_iso(), "event": event})
             job["updatedAt"] = _now_iso()
 
-    def update_status(self, job_id: str, status: str, outcome: Optional[str] = None) -> None:
+    def update_status(
+        self,
+        job_id: str,
+        status: str,
+        outcome: Optional[str] = None,
+        recovered_amount: Optional[int] = None,
+    ) -> None:
         with _lock:
             job = _jobs[job_id]
             job["status"] = status
             if outcome is not None:
                 job["outcome"] = outcome
+            if recovered_amount is not None:
+                job["recoveredAmount"] = recovered_amount
             job["updatedAt"] = _now_iso()
 
     def reserve_idempotency(self, key: str, new_job_id: str) -> str:
@@ -125,6 +134,7 @@ class _Dynamo:
                 "chart": chart,
                 "rounds": [],
                 "outcome": None,
+                "recoveredAmount": None,
                 "auditTrail": [],
                 "createdAt": now,
                 "updatedAt": now,
@@ -152,12 +162,21 @@ class _Dynamo:
             },
         )
 
-    def update_status(self, job_id: str, status: str, outcome: Optional[str] = None) -> None:
+    def update_status(
+        self,
+        job_id: str,
+        status: str,
+        outcome: Optional[str] = None,
+        recovered_amount: Optional[int] = None,
+    ) -> None:
         expr = "SET #s = :s, updatedAt = :u"
         values = {":s": status, ":u": _now_iso()}
         if outcome is not None:
             expr += ", outcome = :o"
             values[":o"] = outcome
+        if recovered_amount is not None:
+            expr += ", recoveredAmount = :r"
+            values[":r"] = recovered_amount
         self._table.update_item(
             Key={"pk": job_id},
             UpdateExpression=expr,
@@ -215,8 +234,13 @@ def append_audit(job_id: str, event: str) -> None:
     _backend().append_audit(job_id, event)
 
 
-def update_status(job_id: str, status: str, outcome: Optional[str] = None) -> None:
-    _backend().update_status(job_id, status, outcome)
+def update_status(
+    job_id: str,
+    status: str,
+    outcome: Optional[str] = None,
+    recovered_amount: Optional[int] = None,
+) -> None:
+    _backend().update_status(job_id, status, outcome, recovered_amount)
 
 
 def reserve_idempotency(key: str, new_job_id: str) -> str:

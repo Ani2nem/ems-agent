@@ -75,9 +75,13 @@ def test_parse_chart_retries_once_on_malformed_json_via_mocked_boto3(_bedrock_on
     transcript = "patient with chest pain"
     chart = agents.parse_chart(transcript)
 
-    # incidentId is always backend-assigned (never requested from the model),
-    # so it overrides whatever VALID_CHART happened to carry.
-    expected = dict(VALID_CHART, incidentId=agents._incident_id(transcript))
+    # incidentId and billedAmount are always backend-assigned (never
+    # requested from the model), so they override/extend VALID_CHART.
+    expected = dict(
+        VALID_CHART,
+        incidentId=agents._incident_id(transcript),
+        billedAmount=agents.rate_for(VALID_CHART["levelOfService"]),
+    )
     assert chart == expected
     assert len(fake_client.calls) == 2
     # The repair prompt on retry must reference the parse failure so the model

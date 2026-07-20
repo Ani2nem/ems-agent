@@ -22,6 +22,7 @@ def test_overturn_at_rereview(strong_chart):
 
     assert job["status"] == "RESOLVED"
     assert job["outcome"] == "OVERTURNED"
+    assert job["recoveredAmount"] == strong_chart["billedAmount"]
     # Round 1 only: denial, appeal, single ruling. No round-2 escalation.
     assert [r["type"] for r in job["rounds"]] == ["denial", "appeal", "ruling"]
     assert all(r["round"] == 1 for r in job["rounds"])
@@ -34,6 +35,7 @@ def test_overturn_at_final_ruling(moderate_chart):
 
     assert job["status"] == "RESOLVED"
     assert job["outcome"] == "OVERTURNED"
+    assert job["recoveredAmount"] == moderate_chart["billedAmount"]
     # Full two-round negotiation: denial, appeal, ruling, appeal, ruling.
     assert [r["type"] for r in job["rounds"]] == [
         "denial",
@@ -53,6 +55,9 @@ def test_escalate_to_human(weak_chart):
 
     assert job["status"] == "ESCALATED"
     assert job["outcome"] == "ESCALATED"
+    # weak_chart is BLS -> denial reason is CO-50, not DOWNGRADE -> nothing
+    # recovered automatically (see test_handlers.py for the DOWNGRADE case).
+    assert job["recoveredAmount"] == 0
     assert len(_rounds_of(job, "ruling")) == 2  # both rulings upheld
 
 

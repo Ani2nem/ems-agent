@@ -36,6 +36,7 @@ class EPCRChart(BaseModel):
     levelOfService: Literal["BLS", "ALS"]
     transportPriority: str
     narrative: str
+    billedAmount: int
 
 
 class ParseAudioRequest(BaseModel):
