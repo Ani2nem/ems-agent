@@ -497,7 +497,14 @@ def _rule_bedrock(chart: dict, appeal_content: str, policy: str, *, biased: bool
         "'DECISION: UPHOLD'."
     )
     user = f"POLICY:\n{policy}\n\nCHART:\n{json.dumps(chart)}\n\nAPPEAL:\n{appeal_content}"
-    raw = bedrock.converse(system, user)
+    # Found live: this prompt often quotes the policy back at length plus a
+    # multi-point analysis before reaching the required final DECISION line -
+    # converse()'s default max_tokens=700 sometimes truncates the response
+    # before that line is ever generated (observed: 454 words, cut off
+    # mid-sentence, no DECISION anywhere in the text). No tag to extract in
+    # that case isn't a parsing miss, it's a real answer that never got
+    # generated. 1200 gives solid headroom over the observed failure case.
+    raw = bedrock.converse(system, user, max_tokens=1200)
     tag = (_extract_tag(raw, "DECISION") or "").lower()
     if tag not in {"overturn", "uphold"}:
         # Safe fallback matches each stage's bias.
