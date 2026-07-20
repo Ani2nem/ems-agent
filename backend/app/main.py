@@ -110,6 +110,7 @@ def get_claim(job_id: str):
         "status": job["status"],
         "rounds": job.get("rounds", []),
         "outcome": job.get("outcome"),
+        "recoveredAmount": job.get("recoveredAmount"),
         "auditTrail": job.get("auditTrail", []),
     }
 

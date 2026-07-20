@@ -1,3 +1,4 @@
+import { formatUsd } from './format';
 import type { JobStatus, Outcome } from './types';
 
 export type Tone = 'neutral' | 'progress' | 'danger' | 'success' | 'warning';
@@ -15,7 +16,12 @@ export interface StatusMeta {
  * copy, and visual tone. Single source of truth for the status → UI mapping
  * described in docs/api-contract.md § "Status progression".
  */
-export function statusMeta(status: JobStatus, outcome: Outcome): StatusMeta {
+export function statusMeta(
+  status: JobStatus,
+  outcome: Outcome,
+  recoveredAmount?: number | null,
+  billedAmount?: number,
+): StatusMeta {
   switch (status) {
     case 'PENDING':
       return {
@@ -45,20 +51,22 @@ export function statusMeta(status: JobStatus, outcome: Outcome): StatusMeta {
         tone: 'progress',
         active: true,
       };
-    case 'RESOLVED':
-      return {
-        label: 'Revenue recovered',
-        detail: outcome === 'OVERTURNED' ? 'Denial overturned - claim approved.' : 'Claim resolved.',
-        tone: 'success',
-        active: false,
-      };
-    case 'ESCALATED':
-      return {
-        label: 'Escalated - human review',
-        detail: 'Negotiation capped without resolution. Routed to a human biller.',
-        tone: 'warning',
-        active: false,
-      };
+    case 'RESOLVED': {
+      const detail =
+        recoveredAmount != null
+          ? `Denial overturned - ${formatUsd(recoveredAmount)} recovered.`
+          : outcome === 'OVERTURNED'
+            ? 'Denial overturned - claim approved.'
+            : 'Claim resolved.';
+      return { label: 'Revenue recovered', detail, tone: 'success', active: false };
+    }
+    case 'ESCALATED': {
+      const detail =
+        recoveredAmount != null && recoveredAmount > 0
+          ? `${formatUsd(recoveredAmount)}${billedAmount != null ? ` of ${formatUsd(billedAmount)}` : ''} recovered automatically - remaining balance escalated for human review.`
+          : 'Negotiation capped without resolution. Routed to a human biller.';
+      return { label: 'Escalated - human review', detail, tone: 'warning', active: false };
+    }
     case 'ERROR':
       return {
         label: 'Workflow error',

@@ -29,7 +29,9 @@ NEMSIS-inspired structured patient care report.
   "comorbidities": ["string"],
   "levelOfService": "BLS" | "ALS",
   "transportPriority": "string",      // e.g. "Priority 1 (emergent)"
-  "narrative": "string"               // cleaned clinical narrative
+  "narrative": "string",              // cleaned clinical narrative
+  "billedAmount": 900                 // number; flat mock rate by levelOfService (BLS=500, ALS=900),
+                                       // computed server-side in parse-audio - not real insurance/CMS math
 }
 ```
 
@@ -101,6 +103,8 @@ Poll for negotiation progress and result. Frontend polls this (~1s interval) unt
     "status": JobStatus,
     "rounds": [ NegotiationRound, ... ],   // grows as the workflow progresses
     "outcome": Outcome,                     // set when terminal
+    "recoveredAmount": 900,                 // number|null; set when status is RESOLVED or ESCALATED
+                                             // (see "Recovery amounts" below); null before that
     "auditTrail": [ AuditEntry, ... ]
   }
   ```
@@ -121,3 +125,13 @@ ERROR       → surfaced to user; safe to retry with a new idempotencyKey
 ```
 
 The frontend is driven entirely by `status` + the growing `rounds`/`auditTrail` arrays. New rounds appended in order; never mutated retroactively.
+
+## Recovery amounts
+
+`recoveredAmount` is set once the job reaches a terminal state:
+
+- **`RESOLVED`** (`outcome=OVERTURNED`): the full `billedAmount` - the denial (or downgrade) was reversed.
+- **`ESCALATED`** after a `DOWNGRADE` denial: the lower BLS rate - that portion was never contested,
+  only the ALS differential was; a human still needs to chase the rest.
+- **`ESCALATED`** after any other denial reason (`CO-50`, `CO-16`, `CO-11`): `0` - nothing recovered
+  automatically.

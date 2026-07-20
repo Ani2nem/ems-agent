@@ -2,7 +2,7 @@
 
 import uuid
 
-from app import handlers, store
+from app import agents, handlers, store
 
 
 def _state(chart):
@@ -75,8 +75,41 @@ def test_resolve_and_escalate_terminal_side_effects(strong_chart):
     handlers.resolve(r)
     job = store.get_job(r["jobId"])
     assert job["status"] == "RESOLVED" and job["outcome"] == "OVERTURNED"
+    assert job["recoveredAmount"] == strong_chart["billedAmount"]
 
     e = _state(strong_chart)
     handlers.escalate(e)
     job = store.get_job(e["jobId"])
     assert job["status"] == "ESCALATED" and job["outcome"] == "ESCALATED"
+    # No denial round on record in this synthetic state -> nothing recovered.
+    assert job["recoveredAmount"] == 0
+
+
+def test_escalate_after_downgrade_denial_recovers_bls_rate(strong_chart):
+    """A DOWNGRADE denial only contests the ALS differential - the BLS base
+    rate is still recovered even if the ALS appeal itself escalates.
+
+    The mock necessity-score math can never produce this combination
+    naturally (every ALS chart scores >= 2, which always clears the biased
+    final-ruling threshold and overturns) - it's a real, reachable outcome
+    in live Bedrock mode though, where the reason code and ruling decision
+    come from two independent model calls with no such coupling. Tested
+    directly at the handler level for that reason.
+    """
+    state = _state(strong_chart)
+    store.append_round(
+        state["jobId"],
+        {
+            "round": 1,
+            "actor": "payer",
+            "type": "denial",
+            "reasonCode": "DOWNGRADE",
+            "content": "Claim adjusted under DOWNGRADE.",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    handlers.escalate(state)
+    job = store.get_job(state["jobId"])
+    assert job["status"] == "ESCALATED" and job["outcome"] == "ESCALATED"
+    assert job["recoveredAmount"] == agents.rate_for("BLS")
+    assert job["recoveredAmount"] < strong_chart["billedAmount"]  # partial, not full

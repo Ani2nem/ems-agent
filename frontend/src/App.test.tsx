@@ -16,10 +16,19 @@ const CHART: ePCRChart = {
   levelOfService: 'ALS',
   transportPriority: 'Priority 1 (emergent)',
   narrative: 'Patient transported emergent following an MVC.',
+  billedAmount: 900,
 };
 
 function jobState(over: Partial<JobState>): JobState {
-  return { jobId: 'job-1', status: 'PENDING', rounds: [], outcome: null, auditTrail: [], ...over };
+  return {
+    jobId: 'job-1',
+    status: 'PENDING',
+    rounds: [],
+    outcome: null,
+    recoveredAmount: null,
+    auditTrail: [],
+    ...over,
+  };
 }
 
 const okJson = (body: unknown, status = 200) =>
@@ -56,6 +65,7 @@ describe('App negotiation flow', () => {
       jobState({
         status: 'RESOLVED',
         outcome: 'OVERTURNED',
+        recoveredAmount: 900,
         rounds: [
           {
             round: 1,
@@ -111,6 +121,7 @@ describe('App negotiation flow', () => {
     // Chart panel renders the structured fields.
     expect(await screen.findByText('INC-2026-04837')).toBeInTheDocument();
     expect(screen.getByText('45 yo M')).toBeInTheDocument();
+    expect(screen.getByText('$900')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /submit claim/i }));
 
@@ -119,6 +130,7 @@ describe('App negotiation flow', () => {
     expect(await screen.findByText(/claim denied/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/revenue recovered/i)).toBeInTheDocument();
+    expect(screen.getByText(/\$900 recovered/i)).toBeInTheDocument();
 
     // Both negotiation rounds and the audit trail are rendered.
     expect(screen.getByText(/meets als criteria per policy/i)).toBeInTheDocument();

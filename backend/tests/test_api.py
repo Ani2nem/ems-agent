@@ -43,6 +43,7 @@ def test_parse_audio_returns_valid_chart():
     assert chart["levelOfService"] == "ALS"
     assert chart["patient"]["age"] == 62
     assert chart["patient"]["sex"] == "M"
+    assert chart["billedAmount"] == 900
 
 
 def test_parse_audio_is_deterministic():
@@ -97,6 +98,7 @@ def test_submit_claim_full_flow(strong_chart):
     final = _poll_until_terminal(job_id)
     assert final["status"] == "RESOLVED"
     assert final["outcome"] == "OVERTURNED"
+    assert final["recoveredAmount"] == strong_chart["billedAmount"]
     assert final["rounds"][0]["type"] == "denial"
     assert final["auditTrail"]
 
@@ -141,3 +143,4 @@ def test_escalation_flow_via_api(weak_chart):
     final = _poll_until_terminal(job_id)
     assert final["status"] == "ESCALATED"
     assert final["outcome"] == "ESCALATED"
+    assert final["recoveredAmount"] == 0  # weak_chart is BLS -> CO-50, not DOWNGRADE

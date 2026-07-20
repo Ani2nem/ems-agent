@@ -31,6 +31,15 @@ Decision = Literal["overturn", "uphold"]
 _POLICY_DIR = Path(__file__).parent / "policies"
 _POLICY_FILES = {"AETNA": "aetna_ambulance.txt", "MEDICARE": "cms_ambulance.txt"}
 
+# Flat mock ambulance base rates by level of service - not real insurance or
+# CMS fee-schedule math (those vary by locality/mileage). See docs/api-
+# contract.md's "Recovery amounts" for how this feeds recoveredAmount.
+_RATE_TABLE = {"BLS": 500, "ALS": 900}
+
+
+def rate_for(level_of_service: str) -> int:
+    return _RATE_TABLE[level_of_service]
+
 # Payer flips to provider on re-review only for a clearly emergent, well
 # documented ALS transport; the final ruling has a much lower bar (biased).
 _REREVIEW_OVERTURN_THRESHOLD = 5
@@ -149,9 +158,12 @@ _COMORBIDITY_PATTERNS = (
 
 
 def parse_chart(transcript: str) -> dict:
-    if settings().use_bedrock:
-        return _parse_chart_bedrock(transcript)
-    return _mock_chart(transcript)
+    chart = _parse_chart_bedrock(transcript) if settings().use_bedrock else _mock_chart(transcript)
+    # billedAmount is always assigned server-side from levelOfService, same as
+    # incidentId - never trusted to the model, and never left unset for the
+    # mock path either, so it always round-trips through submit-claim.
+    chart["billedAmount"] = _RATE_TABLE.get(chart.get("levelOfService"), 0)
+    return chart
 
 
 def _incident_id(transcript: str) -> str:
