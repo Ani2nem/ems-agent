@@ -1,11 +1,23 @@
 """Job-record persistence (see ``docs/workflow-contract.md``).
 
-Two backends behind one API, selected the same way ``main._start_workflow``
-picks Step Functions vs. the in-process driver: both ``USE_BEDROCK=true`` AND
-a deployed ``state_machine_arn`` must be present, not ``USE_BEDROCK`` alone -
-``USE_BEDROCK=true`` with no deployed infra (e.g. live-Bedrock local testing)
-must still use the in-process store, per the workflow contract's "USE_BEDROCK=
-false or running locally" invariant.
+Two backends behind one API, selected by ``USE_BEDROCK`` AND ``DEPLOYED``
+both being set - not ``USE_BEDROCK`` alone, since ``USE_BEDROCK=true`` with no
+deployed infra (e.g. live-Bedrock local testing) must still use the in-process
+store, per the workflow contract's "USE_BEDROCK=false or running locally"
+invariant.
+
+``DEPLOYED`` (not ``STATE_MACHINE_ARN``) is the deployed-infra signal here on
+purpose: it's a plain literal set via SAM template Globals, present on every
+function in the stack. ``STATE_MACHINE_ARN`` looks like it should work too,
+but giving every handler Lambda (Deny/Appeal/ReReview/...) a ``!Ref`` to the
+state machine - not just ``ApiFunction``, which needs it to call
+``states:StartExecution`` - creates a circular CloudFormation dependency: the
+state machine's own definition already references those same Lambdas' ARNs.
+This shipped once as exactly that bug: every handler Lambda silently fell
+back to the in-process store (empty on every fresh invocation, since each is
+a separate Lambda), and every real negotiation failed with a ``KeyError`` on
+the very first ``store.append_round()`` call - invisible locally and in CI,
+only visible against real deployed infra.
 
 * local (mock OR live-Bedrock-no-infra) -> a thread-safe in-process dict
   (background negotiation thread and the request handlers share it).
@@ -211,7 +223,7 @@ _dynamo: Optional[_Dynamo] = None
 def _backend():
     global _dynamo
     cfg = settings()
-    if not (cfg.use_bedrock and cfg.state_machine_arn):
+    if not (cfg.use_bedrock and cfg.deployed):
         return _memory
     if _dynamo is None:
         _dynamo = _Dynamo()
