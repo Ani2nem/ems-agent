@@ -55,6 +55,10 @@ Globals:
         ENABLE_SES_EMAIL: !Ref EnableSesEmail
         ESCALATION_EMAIL: !Ref EscalationEmail
         STAGE_NAME: !Ref StageName
+        # A plain literal (never a !Ref/!GetAtt) marking every function in
+        # this stack as genuinely deployed - see backend/app/store.py's
+        # _backend() and its docstring for why this exists and what it fixes.
+        DEPLOYED: "true"
   Api:
     TracingEnabled: true
 
@@ -206,6 +210,35 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
 
+  # SPA client-side routing, done as a request rewrite instead of CloudFront's
+  # distribution-wide CustomErrorResponses. CustomErrorResponses can't be
+  # scoped to one cache behavior - it applies to every origin behind the
+  # distribution, including the /api/* -> API Gateway behavior, which meant a
+  # real 404 from the API (e.g. GET /api/submit-claim/{unknown-id}) was
+  # silently replaced with the SPA's index.html at 200, masking real API
+  # errors from anyone hitting the public CloudFront URL. This function only
+  # touches the default (s3-site) behavior, so /api/* responses pass through
+  # exactly as the API returned them.
+  SpaRoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${AWS::StackName}-spa-routing"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Rewrite non-file requests to /index.html for SPA client-side routing.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var uri = event.request.uri;
+          // Any file-looking request (has a dot in the last path segment,
+          // e.g. /assets/index-abc123.js) is a real built asset - pass through.
+          // Everything else is a client-side route - resolve to the app shell.
+          if (!uri.split('/').pop().includes('.')) {
+            event.request.uri = '/index.html';
+          }
+          return event.request;
+        }
+
   SiteOAC:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -244,6 +277,9 @@ Resources:
           Compress: true
           # Managed-CachingOptimized (well-known AWS policy id).
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRoutingFunction.FunctionARN
         CacheBehaviors:
           - PathPattern: /api/*
             TargetOriginId: api-gw
@@ -252,11 +288,6 @@ Resources:
             # Managed-CachingDisabled + Managed-AllViewerExceptHostHeader.
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-        CustomErrorResponses:
-          # SPA client-side routing: deep links resolve to index.html.
-          # A missing S3 key returns 403 (GetObject-only policy), so map both.
-          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
-          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 10 }
         ViewerCertificate:
           CloudFrontDefaultCertificate: true   # *.cloudfront.net, no custom domain
 

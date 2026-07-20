@@ -30,6 +30,14 @@ class Settings:
     aws_region: str
     jobs_table: str
     state_machine_arn: str
+    # A plain literal set in every Lambda's environment in infra/template.yaml
+    # (Globals, not per-function) - true only for genuinely deployed Lambdas,
+    # regardless of which function. See store.py's _backend() docstring:
+    # STATE_MACHINE_ARN alone can't be that signal, because giving every
+    # handler Lambda a !Ref to the state machine (instead of just ApiFunction)
+    # would create a circular CloudFormation dependency - the state machine's
+    # own definition already references those same Lambdas' ARNs.
+    deployed: bool
     enable_ses_email: bool
     escalation_email: str
     # API Gateway HTTP API stage prefix (e.g. "prod"), stripped from Mangum's
@@ -48,6 +56,7 @@ def settings() -> Settings:
         aws_region=os.getenv("AWS_REGION", "us-east-1"),
         jobs_table=os.getenv("JOBS_TABLE", "ems-agent-jobs"),
         state_machine_arn=os.getenv("STATE_MACHINE_ARN", ""),
+        deployed=_flag("DEPLOYED"),
         enable_ses_email=_flag("ENABLE_SES_EMAIL"),
         escalation_email=os.getenv("ESCALATION_EMAIL", ""),
         stage_name=os.getenv("STAGE_NAME", ""),
