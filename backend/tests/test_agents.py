@@ -1,10 +1,25 @@
 """Agent-level tests: mock determinism, scoring, and the Bedrock parse path
 (monkeypatched so no AWS is required)."""
 
+import json
+
 import pytest
 
 from app import agents, bedrock
 from tests.conftest import _base_chart
+
+_VALID_BEDROCK_CHART = {
+    "patient": {"age": 58, "sex": "M"},
+    "payer": "AETNA",
+    "chiefComplaint": "chest pain",
+    "mechanismOfInjury": "none",
+    "vitals": {"gcs": 15, "bp": "128/82", "hr": 90, "spo2": 98, "rr": 18},
+    "interventions": ["IV access"],
+    "comorbidities": [],
+    "levelOfService": "ALS",
+    "transportPriority": "Priority 1 (emergent)",
+    "narrative": "Patient with chest pain.",
+}
 
 
 # ------------------------------- scoring ------------------------------- #
@@ -309,5 +324,36 @@ def test_bedrock_ruling_strips_tag_despite_bold_and_trailing_fence(_bedrock_on, 
 
 def test_bedrock_parse_chart_invalid_json_raises_502_error(_bedrock_on, monkeypatch):
     monkeypatch.setattr(bedrock, "converse", lambda *a, **k: "not json")
+    with pytest.raises(bedrock.BedrockError):
+        agents.parse_chart("some transcript")
+
+
+def test_bedrock_parse_chart_coerces_numeric_bp_to_string(_bedrock_on, monkeypatch):
+    """Found live: Nova Micro sometimes returns vitals.bp as a bare number
+    (e.g. 148) instead of the string the schema requires, which crashed
+    FastAPI's response serialization with an unhandled 500."""
+    payload = {**_VALID_BEDROCK_CHART, "vitals": {**_VALID_BEDROCK_CHART["vitals"], "bp": 148}}
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: json.dumps(payload))
+    chart = agents.parse_chart("some transcript")
+    assert chart["vitals"]["bp"] == "148"
+
+
+def test_bedrock_parse_chart_defaults_null_sex_and_payer(_bedrock_on, monkeypatch):
+    """Found live: the model sometimes leaves patient.sex/payer null - the
+    same "do not invent facts" behavior that caused the earlier incidentId
+    bug, but on fields the schema doesn't allow to be empty."""
+    payload = {**_VALID_BEDROCK_CHART, "patient": {**_VALID_BEDROCK_CHART["patient"], "sex": None}, "payer": None}
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: json.dumps(payload))
+    chart = agents.parse_chart("some transcript")
+    assert chart["patient"]["sex"] == "U"
+    assert chart["payer"] == "AETNA"
+
+
+def test_bedrock_parse_chart_raises_502_on_unfixable_schema_mismatch(_bedrock_on, monkeypatch):
+    """A schema mismatch outside the specific quirks _normalize_chart knows
+    about (e.g. an invalid levelOfService) must still fail as a clean 502
+    via BedrockError, never leak through as an unhandled 500."""
+    payload = {**_VALID_BEDROCK_CHART, "levelOfService": "ICU"}
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: json.dumps(payload))
     with pytest.raises(bedrock.BedrockError):
         agents.parse_chart("some transcript")

@@ -23,8 +23,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import ValidationError
+
 from . import bedrock
 from .config import settings
+from .models import EPCRChart
 
 Decision = Literal["overturn", "uphold"]
 
@@ -263,7 +266,11 @@ def _parse_chart_bedrock(transcript: str) -> dict:
         "patient{age,sex}, payer (AETNA or MEDICARE), chiefComplaint, "
         "mechanismOfInjury, vitals{gcs,bp,hr,spo2,rr}, interventions (array), "
         "comorbidities (array), levelOfService (BLS or ALS), transportPriority, "
-        "narrative. Use null for unknown vitals. Do not invent facts."
+        "narrative. Vitals may be null if genuinely unknown - do not invent "
+        "facts for them. patient.sex and payer are never null: if the "
+        "dictation doesn't state them, use \"U\" for sex and \"AETNA\" for "
+        "payer rather than omitting or nulling the field. vitals.bp is always "
+        "a string (e.g. \"128/82\"), never a bare number."
     )
     raw = bedrock.converse(system, transcript, temperature=0.2)
     try:
@@ -282,7 +289,45 @@ def _parse_chart_bedrock(transcript: str) -> dict:
             raise bedrock.BedrockError(
                 f"could not parse chart JSON after retry: {exc2}"
             ) from exc2
+    data = _normalize_chart(data)
     data["incidentId"] = _incident_id(transcript)
+    # billedAmount is normally stamped by parse_chart() after this returns, but
+    # the schema requires it, so compute it early to validate the full shape
+    # here; parse_chart() will recompute the identical value right after.
+    data["billedAmount"] = _RATE_TABLE.get(data.get("levelOfService"), 0)
+    try:
+        EPCRChart.model_validate(data)
+    except ValidationError as exc:
+        raise bedrock.BedrockError(f"model returned a chart that doesn't match the schema: {exc}") from exc
+    return data
+
+
+def _normalize_chart(data: dict) -> dict:
+    """Coerce the Nova Micro quirks observed live, same intent as the prompt
+    rules above but enforced in code since the model doesn't follow them
+    100% of the time.
+
+    ``vitals.bp`` sometimes comes back as a bare number instead of a string.
+    ``patient.sex``/``payer`` sometimes come back null even after the prompt
+    tells the model not to null them - the same "do not invent facts" tension
+    that caused the earlier ``incidentId`` bug (see bedrock-live-wiring-notes.md),
+    just on fields the schema doesn't allow to be empty. Anything this doesn't
+    catch still fails safely via the ``EPCRChart.model_validate`` check above.
+    """
+    vitals = data.get("vitals") or {}
+    bp = vitals.get("bp")
+    if isinstance(bp, (int, float)):
+        vitals["bp"] = str(bp)
+    data["vitals"] = vitals
+
+    patient = data.get("patient") or {}
+    if not patient.get("sex"):
+        patient["sex"] = "U"
+    data["patient"] = patient
+
+    if data.get("payer") not in ("AETNA", "MEDICARE"):
+        data["payer"] = "AETNA"
+
     return data
 
 
