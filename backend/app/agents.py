@@ -342,6 +342,11 @@ def _parse_chart_bedrock(transcript: str) -> dict:
     stripped = raw.strip()
     if stripped == _NOT_CLINICAL_SENTINEL or stripped.startswith(f"{_NOT_CLINICAL_SENTINEL}:"):
         reply = stripped[len(_NOT_CLINICAL_SENTINEL) + 1 :].strip()
+        if len(reply) >= 2 and reply[0] == reply[-1] == '"':
+            # The few-shot examples in the prompt wrap the reply in quotes as
+            # part of the surrounding prose; the model sometimes echoes those
+            # quote characters into its actual output instead of just the text.
+            reply = reply[1:-1].strip()
         raise NotClinicalTranscriptError(reply or NotClinicalTranscriptError.DEFAULT_MESSAGE)
     try:
         data = json.loads(_strip_code_fence(raw))

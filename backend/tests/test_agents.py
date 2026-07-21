@@ -385,6 +385,20 @@ def test_bedrock_parse_chart_raises_not_clinical_with_models_own_reply(_bedrock_
         agents.parse_chart("never gonna give you up, never gonna let you down")
 
 
+def test_bedrock_parse_chart_not_clinical_strips_stray_quote_wrapping(_bedrock_on, monkeypatch):
+    """Found live: the model sometimes echoes the literal quote characters
+    from the prompt's few-shot examples into its own reply, producing a
+    message that displays with stray quotation marks around it."""
+    monkeypatch.setattr(
+        bedrock,
+        "converse",
+        lambda *a, **k: 'NOT_A_PATIENT_REPORT: "Baby talk won\'t get us anywhere - try again with an actual patient."',
+    )
+    with pytest.raises(agents.NotClinicalTranscriptError) as exc_info:
+        agents.parse_chart("baby baby baby oh")
+    assert str(exc_info.value) == "Baby talk won't get us anywhere - try again with an actual patient."
+
+
 def test_bedrock_parse_chart_not_clinical_falls_back_to_default_message(_bedrock_on, monkeypatch):
     """If the model returns the bare sentinel with no reply attached (should
     be rare given the prompt, but not impossible), don't show an empty error
