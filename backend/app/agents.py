@@ -254,6 +254,28 @@ def _mock_chart(transcript: str) -> dict:
     }
 
 
+class NotClinicalTranscriptError(Exception):
+    """Raised when the model reports the transcript isn't an EMS patient
+    encounter at all (song lyrics, small talk, gibberish, ...).
+
+    Distinct from ``BedrockError``: the model isn't malfunctioning here, it's
+    correctly doing what it was asked - there's just no chart to build. Faking
+    a chart from non-clinical input would be a worse outcome than refusing, so
+    this is a first-class result, not a parsing failure. Carries the model's
+    own reply as its message; callers should fall back to DEFAULT_MESSAGE if
+    that ever comes back empty.
+    """
+
+    DEFAULT_MESSAGE = (
+        "That's not a patient care report. Give me an age, a chief "
+        "complaint, some vitals, and what you did for them, and I'll build "
+        "the chart."
+    )
+
+
+_NOT_CLINICAL_SENTINEL = "NOT_A_PATIENT_REPORT"
+
+
 def _parse_chart_bedrock(transcript: str) -> dict:
     # incidentId is assigned by the backend (same deterministic hash as the
     # mock path), never requested from the model - asked to invent one, a
@@ -266,13 +288,61 @@ def _parse_chart_bedrock(transcript: str) -> dict:
         "patient{age,sex}, payer (AETNA or MEDICARE), chiefComplaint, "
         "mechanismOfInjury, vitals{gcs,bp,hr,spo2,rr}, interventions (array), "
         "comorbidities (array), levelOfService (BLS or ALS), transportPriority, "
-        "narrative. Vitals may be null if genuinely unknown - do not invent "
-        "facts for them. patient.sex and payer are never null: if the "
-        "dictation doesn't state them, use \"U\" for sex and \"AETNA\" for "
-        "payer rather than omitting or nulling the field. vitals.bp is always "
-        "a string (e.g. \"128/82\"), never a bare number."
+        "narrative. Field types, exactly: patient.age is a number or null - "
+        "NEVER a string, never \"U\", never approximate text like \"70s\". "
+        "vitals.gcs/hr/spo2/rr are each a number or null - NEVER a string. "
+        "vitals.bp is always a string (e.g. \"128/82\") or null, never a "
+        "bare number. The string \"U\" is ONLY ever valid for patient.sex, "
+        "nowhere else. patient.sex is never null and must reflect what was "
+        "actually said: \"M\" if male/man/he/his is used, \"F\" if "
+        "female/woman/she/her is used, and \"U\" ONLY when the dictation "
+        "truly gives no indication either way - always extract M or F when "
+        "the dictation supports it, \"U\" is a last resort, not a default. "
+        "payer is never null: use \"AETNA\" if the dictation doesn't state "
+        "it. "
+        "chiefComplaint, mechanismOfInjury, and transportPriority are never "
+        "null either, even when the dictation doesn't cover them - use "
+        "\"Not stated in dictation.\" for whichever of those three is "
+        "missing, rather than guessing or omitting it. Do not invent facts "
+        "for any field - state exactly what's genuinely unknown using the "
+        "rules above instead of leaving JSON keys out.\n\n"
+        "Only treat a dictation as NOT a patient report if it has zero "
+        "clinical content at all - song lyrics, greetings/small talk, a mic "
+        "check like \"testing testing\", gibberish, or anything otherwise "
+        "unrelated to patient care. A short, incomplete, or vague report is "
+        "still a REAL patient report and must be charted normally per the "
+        "field rules above - never reject something just because it's "
+        "brief or lacks detail, and even if patient age/sex isn't mentioned "
+        "at all. Any single mention of a symptom, complaint, injury, vitals, "
+        "or condition - on its own, with nothing else - counts as real "
+        "clinical content. For example, \"chest pain, 70s male\", "
+        "\"unresponsive male found down\", \"BP 90 over 60, heart rate "
+        "110\", and even just \"she's not breathing right\" on its own "
+        "must ALL be charted normally, never rejected.\n\n"
+        "Only when there is truly no clinical content at all, respond with "
+        f"EXACTLY: {_NOT_CLINICAL_SENTINEL}: <reply>, where <reply> is one "
+        "short sentence (under 160 characters) that (1) plays off what they "
+        "actually said, so it's obvious you read it, (2) makes clear this "
+        "isn't a valid patient report, and (3) asks for a real one. Be "
+        "genuinely witty - like a sharp coworker ribbing a prank call, a "
+        "real jab, not a bland refusal - but stay good-natured: no "
+        "profanity, no insults about the person themselves, nothing "
+        "mean-spirited. If the transcript contains anything hateful, "
+        "explicit, or otherwise inappropriate, drop the joke entirely and "
+        "just give a plain, professional refusal instead - never quote or "
+        "riff on inappropriate content. Examples of the register to aim for "
+        "(write your own each time, do not reuse these): dictation is song "
+        f"lyrics -> \"{_NOT_CLINICAL_SENTINEL}: Nice vocals, but a chorus "
+        "isn't a chief complaint - try again with an actual patient.\"; "
+        f"dictation is \"testing testing\" -> \"{_NOT_CLINICAL_SENTINEL}: "
+        "Test received, mic's working - now give me a real patient to work "
+        "with.\""
     )
     raw = bedrock.converse(system, transcript, temperature=0.2)
+    stripped = raw.strip()
+    if stripped == _NOT_CLINICAL_SENTINEL or stripped.startswith(f"{_NOT_CLINICAL_SENTINEL}:"):
+        reply = stripped[len(_NOT_CLINICAL_SENTINEL) + 1 :].strip()
+        raise NotClinicalTranscriptError(reply or NotClinicalTranscriptError.DEFAULT_MESSAGE)
     try:
         data = json.loads(_strip_code_fence(raw))
     except (ValueError, TypeError) as exc:
@@ -289,7 +359,7 @@ def _parse_chart_bedrock(transcript: str) -> dict:
             raise bedrock.BedrockError(
                 f"could not parse chart JSON after retry: {exc2}"
             ) from exc2
-    data = _normalize_chart(data)
+    data = _normalize_chart(data, transcript)
     data["incidentId"] = _incident_id(transcript)
     # billedAmount is normally stamped by parse_chart() after this returns, but
     # the schema requires it, so compute it early to validate the full shape
@@ -302,31 +372,71 @@ def _parse_chart_bedrock(transcript: str) -> dict:
     return data
 
 
-def _normalize_chart(data: dict) -> dict:
+_NOT_STATED_TEXT = "Not stated in dictation."
+
+# Fields the schema requires as non-null strings but that a genuinely valid,
+# terse dictation often just doesn't cover - "not stated" is honest and
+# non-fabricating, unlike guessing a value (see docstring below).
+_TEXT_FIELDS_DEFAULT_NOT_STATED = ("chiefComplaint", "mechanismOfInjury", "transportPriority")
+
+
+def _as_int_or_none(value):
+    if isinstance(value, bool):  # bool is an int subclass; never coerce it
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value)
+    return None
+
+
+def _normalize_chart(data: dict, transcript: str) -> dict:
     """Coerce the Nova Micro quirks observed live, same intent as the prompt
     rules above but enforced in code since the model doesn't follow them
-    100% of the time.
+    100% of the time - confirmed live: even with the prompt spelling out
+    exact field types, the model still sometimes puts the literal string
+    "U" into patient.age or a vitals field (over-generalizing the "use U for
+    unknown sex" rule) instead of null.
 
     ``vitals.bp`` sometimes comes back as a bare number instead of a string.
+    ``patient.age``/``vitals.gcs``/``hr``/``spo2``/``rr`` sometimes come back
+    as a non-numeric string instead of null - coerced to null here rather
+    than failing, since a genuinely unknown vital is normal, valid input.
     ``patient.sex``/``payer`` sometimes come back null even after the prompt
     tells the model not to null them - the same "do not invent facts" tension
     that caused the earlier ``incidentId`` bug (see bedrock-live-wiring-notes.md),
-    just on fields the schema doesn't allow to be empty. Anything this doesn't
-    catch still fails safely via the ``EPCRChart.model_validate`` check above.
+    just on fields the schema doesn't allow to be empty. ``narrative``,
+    ``chiefComplaint``, ``mechanismOfInjury``, and ``transportPriority`` are
+    sometimes dropped or left null for a genuinely valid but terse dictation
+    that just doesn't mention them (e.g. a medical complaint has no
+    mechanism of injury to report) - "not stated"/the raw transcript is
+    honest here, unlike guessing a clinical value would be. Anything this
+    doesn't catch still fails safely via the ``EPCRChart.model_validate``
+    check above.
     """
     vitals = data.get("vitals") or {}
     bp = vitals.get("bp")
     if isinstance(bp, (int, float)):
         vitals["bp"] = str(bp)
+    for field in ("gcs", "hr", "spo2", "rr"):
+        vitals[field] = _as_int_or_none(vitals.get(field))
     data["vitals"] = vitals
 
     patient = data.get("patient") or {}
-    if not patient.get("sex"):
+    patient["age"] = _as_int_or_none(patient.get("age"))
+    if not isinstance(patient.get("sex"), str) or not patient["sex"]:
         patient["sex"] = "U"
     data["patient"] = patient
 
     if data.get("payer") not in ("AETNA", "MEDICARE"):
         data["payer"] = "AETNA"
+
+    if not data.get("narrative"):
+        data["narrative"] = transcript.strip()
+
+    for field in _TEXT_FIELDS_DEFAULT_NOT_STATED:
+        if not data.get(field):
+            data[field] = _NOT_STATED_TEXT
 
     return data
 

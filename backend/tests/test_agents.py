@@ -338,6 +338,17 @@ def test_bedrock_parse_chart_coerces_numeric_bp_to_string(_bedrock_on, monkeypat
     assert chart["vitals"]["bp"] == "148"
 
 
+def test_bedrock_parse_chart_defaults_missing_narrative_to_transcript(_bedrock_on, monkeypatch):
+    """Found live testing a genuinely valid clinical dictation: Nova Micro
+    sometimes omits the narrative key entirely rather than nulling it, which
+    would otherwise fail EPCRChart validation and reject a perfectly good
+    chart as a 502 "model failure"."""
+    payload = {k: v for k, v in _VALID_BEDROCK_CHART.items() if k != "narrative"}
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: json.dumps(payload))
+    chart = agents.parse_chart("62 yo male chest pain, ALS transport")
+    assert chart["narrative"] == "62 yo male chest pain, ALS transport"
+
+
 def test_bedrock_parse_chart_defaults_null_sex_and_payer(_bedrock_on, monkeypatch):
     """Found live: the model sometimes leaves patient.sex/payer null - the
     same "do not invent facts" behavior that caused the earlier incidentId
@@ -357,3 +368,27 @@ def test_bedrock_parse_chart_raises_502_on_unfixable_schema_mismatch(_bedrock_on
     monkeypatch.setattr(bedrock, "converse", lambda *a, **k: json.dumps(payload))
     with pytest.raises(bedrock.BedrockError):
         agents.parse_chart("some transcript")
+
+
+def test_bedrock_parse_chart_raises_not_clinical_with_models_own_reply(_bedrock_on, monkeypatch):
+    """Found live: dictating non-clinical input (a song, etc.) makes the model
+    correctly follow "do not invent facts" and null out required narrative
+    fields, which used to surface as an opaque schema-validation 502. The
+    prompt now asks the model to self-report via a sentinel plus its own
+    witty reply, which becomes the exception's message verbatim."""
+    monkeypatch.setattr(
+        bedrock,
+        "converse",
+        lambda *a, **k: "NOT_A_PATIENT_REPORT: Great vocals, but that's not a chief complaint.",
+    )
+    with pytest.raises(agents.NotClinicalTranscriptError, match="Great vocals"):
+        agents.parse_chart("never gonna give you up, never gonna let you down")
+
+
+def test_bedrock_parse_chart_not_clinical_falls_back_to_default_message(_bedrock_on, monkeypatch):
+    """If the model returns the bare sentinel with no reply attached (should
+    be rare given the prompt, but not impossible), don't show an empty error
+    - fall back to a sensible default."""
+    monkeypatch.setattr(bedrock, "converse", lambda *a, **k: "NOT_A_PATIENT_REPORT")
+    with pytest.raises(agents.NotClinicalTranscriptError, match="patient care report"):
+        agents.parse_chart("testing testing")

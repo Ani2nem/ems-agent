@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import pytest
 from fastapi.testclient import TestClient
 
+from app import bedrock
 from app.main import app
 
 client = TestClient(app)
@@ -63,6 +64,21 @@ def test_parse_audio_missing_field_is_400():
     resp = client.post("/api/parse-audio", json={})
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_parse_audio_non_clinical_transcript_is_422(monkeypatch):
+    """Found live: dictating something that isn't an EMS encounter (song
+    lyrics, etc.) must surface the model's own on-brand rejection - not a raw
+    schema-validation dump or an unhandled crash."""
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    monkeypatch.setattr(
+        bedrock,
+        "converse",
+        lambda *a, **k: "NOT_A_PATIENT_REPORT: Great vocals, but that's not a chief complaint.",
+    )
+    resp = client.post("/api/parse-audio", json={"transcript": "never gonna give you up, never gonna let you down"})
+    assert resp.status_code == 422
+    assert "Great vocals" in resp.json()["error"]
 
 
 # --------------------------- export-nemsis --------------------------- #

@@ -70,6 +70,8 @@ def parse_audio(body: ParseAudioRequest):
         return _error(400, "transcript is required")
     try:
         chart = agents.parse_chart(body.transcript)
+    except agents.NotClinicalTranscriptError as exc:
+        return _error(422, str(exc))
     except BedrockError as exc:
         return _error(502, f"model failure: {exc}")
     return {"chartId": str(uuid.uuid4()), "chart": chart}
